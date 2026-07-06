@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LinkedIn Auto Posting Bot</title>
+    <!-- Google Fonts: Inter & Space Grotesk -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Style Sheets -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="dark-theme">
+    <div id="toast-container"></div>
+
+    <!-- 1. LOGIN SCREEN -->
+    <div id="login-screen" class="screen active">
+        <div class="glow-bg"></div>
+        <div class="login-container">
+            <div class="login-card">
+                <div class="brand">
+                    <div class="logo-icon"><i class="fa-solid fa-robot"></i></div>
+                    <h1>LinkedIn<span>Bot</span></h1>
+                </div>
+                <p class="subtitle">AI-Powered LinkedIn Content Engine</p>
+                <div class="features-list">
+                    <div class="feature-item">
+                        <i class="fa-solid fa-wand-magic-sparkles text-gradient"></i>
+                        <span>Generate high-converting post text using Gemini AI</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fa-solid fa-image text-gradient"></i>
+                        <span>Create stunning images from prompts with Gemini Image AI</span>
+                    </div>
+                    <div class="feature-item">
+                        <i class="fa-solid fa-calendar-days text-gradient"></i>
+                        <span>Schedule and queue posts to publish automatically</span>
+                    </div>
+                </div>
+                <div id="login-error-message" class="error-msg hidden"></div>
+                <button id="btn-linkedin-login" class="btn btn-primary btn-block btn-lg">
+                    <i class="fa-brands fa-linkedin"></i> Sign in with LinkedIn
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. APP CONTAINER (LOGGED IN) -->
+    <div id="app-screen" class="screen">
+        <div class="app-layout">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <div class="brand">
+                        <div class="logo-icon-sm"><i class="fa-solid fa-robot"></i></div>
+                        <h2>LinkedIn<span>Bot</span></h2>
+                    </div>
+                </div>
+
+                <div class="user-profile-widget">
+                    <div class="avatar-container">
+                        <img id="user-avatar" src="" alt="Avatar" class="avatar">
+                        <div class="avatar-glow"></div>
+                    </div>
+                    <div class="user-info">
+                        <h4 id="user-name">Loading...</h4>
+                        <p id="user-email">...</p>
+                    </div>
+                </div>
+
+                <nav class="sidebar-nav">
+                    <button class="nav-item active" data-tab="dashboard">
+                        <i class="fa-solid fa-chart-simple"></i> Dashboard
+                    </button>
+                    <button class="nav-item" data-tab="create">
+                        <i class="fa-solid fa-circle-plus"></i> Create Post
+                    </button>
+                    <button class="nav-item" data-tab="history">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Post History
+                    </button>
+                </nav>
+
+                <div class="sidebar-footer">
+                    <button id="btn-logout" class="btn btn-logout">
+                        <i class="fa-solid fa-right-from-bracket"></i> Logout
+                    </button>
+                </div>
+            </aside>
+
+            <!-- Main Content Container -->
+            <main class="main-content">
+                <!-- TOP BAR -->
+                <header class="top-bar">
+                    <h2 id="current-tab-title">Dashboard</h2>
+                    <div class="top-bar-actions">
+                        <span id="connection-status" class="badge badge-success">
+                            <i class="fa-solid fa-circle-check"></i> LinkedIn Connected
+                        </span>
+                    </div>
+                </header>
+
+                <div class="content-body">
+                    <!-- A. DASHBOARD VIEW -->
+                    <section id="view-dashboard" class="tab-view active">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-icon"><i class="fa-solid fa-paper-plane"></i></div>
+                                <div class="stat-content">
+                                    <h3>Published</h3>
+                                    <p id="stat-published-count" class="count">0</p>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon"><i class="fa-solid fa-calendar-days"></i></div>
+                                <div class="stat-content">
+                                    <h3>Scheduled</h3>
+                                    <p id="stat-scheduled-count" class="count">0</p>
+                                </div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                                <div class="stat-content">
+                                    <h3>Failed</h3>
+                                    <p id="stat-failed-count" class="count">0</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="dashboard-sections">
+                            <div class="dashboard-main">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3>Upcoming Publications</h3>
+                                        <button class="btn btn-secondary btn-sm" onclick="app.switchTab('create')">
+                                            <i class="fa-solid fa-plus"></i> Schedule New
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <div id="upcoming-posts-list" class="posts-list-mini">
+                                            <!-- Mini list dynamically injected -->
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="dashboard-side">
+                                <div class="card ai-card">
+                                    <div class="glow-bg"></div>
+                                    <h3>AI Powerhouse</h3>
+                                    <p>Ready to automate your professional brand? Start by creating an image-rich campaign with Gemini.</p>
+                                    <button class="btn btn-primary" onclick="app.switchTab('create')">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Launch Post Wizard
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- B. CREATE POST VIEW -->
+                    <section id="view-create" class="tab-view">
+                        <div class="wizard-container">
+                            <div class="card">
+                                <form id="post-creation-form" class="wizard-form">
+                                    <!-- Post Type Selector -->
+                                    <div class="form-section">
+                                        <label class="section-label">1. Choose Post Layout</label>
+                                        <div class="post-type-selector">
+                                            <div class="type-card active" data-type="text_only">
+                                                <div class="type-icon"><i class="fa-solid fa-align-left"></i></div>
+                                                <h4>Text Only</h4>
+                                                <p>Standard professional text-only update</p>
+                                            </div>
+                                            <div class="type-card" data-type="image_text">
+                                                <div class="type-icon"><i class="fa-solid fa-image"></i></div>
+                                                <h4>Text + AI Image</h4>
+                                                <p>Engaging text post with a generated illustration</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Content Field & AI Writer -->
+                                    <div class="form-section">
+                                        <label class="section-label" for="post-text-content">2. Write Post Body</label>
+                                        <div class="textarea-container">
+                                            <textarea id="post-text-content" rows="6" placeholder="What do you want to share today? Or generate one below..." required></textarea>
+                                            <div class="textarea-footer">
+                                                <span id="char-counter">0 / 3000</span>
+                                            </div>
+                                        </div>
+
+                                        <div class="ai-assist-box">
+                                            <div class="ai-assist-header">
+                                                <i class="fa-solid fa-wand-magic-sparkles text-gradient"></i>
+                                                <h4>AI Copywriter Assistant</h4>
+                                            </div>
+                                            <div class="ai-assist-body">
+                                                <div class="input-group">
+                                                    <input type="text" id="ai-text-prompt" placeholder="Enter a topic (e.g. '3 tips for learning SQLAlchemy')">
+                                                    <button type="button" id="btn-generate-text" class="btn btn-secondary">
+                                                        <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                                        <span class="btn-text">Generate Draft</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Image Generation (Conditional) -->
+                                    <div id="image-generation-section" class="form-section hidden">
+                                        <label class="section-label">3. Generate AI Illustration</label>
+                                        
+                                        <div class="ai-assist-box image-box">
+                                            <div class="ai-assist-header">
+                                                <i class="fa-solid fa-image text-gradient"></i>
+                                                <h4>Gemini Image Generator</h4>
+                                            </div>
+                                            <div class="ai-assist-body">
+                                                <div class="input-group">
+                                                    <input type="text" id="ai-image-prompt" placeholder="Describe the image (e.g. 'A futuristic robot programming on a laptop, digital art')">
+                                                    <button type="button" id="btn-generate-image" class="btn btn-secondary">
+                                                        <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                                        <span class="btn-text">Generate Image</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Hidden field to hold image path once generated -->
+                                        <input type="hidden" id="generated-image-url" value="">
+
+                                        <div id="image-preview-container" class="image-preview-container hidden">
+                                            <div class="preview-header">
+                                                <span>Image Preview</span>
+                                                <button type="button" id="btn-remove-image" class="btn-icon"><i class="fa-solid fa-xmark"></i></button>
+                                            </div>
+                                            <img id="image-preview" src="" alt="AI Generated Image">
+                                        </div>
+                                    </div>
+
+                                    <!-- Scheduling -->
+                                    <div class="form-section">
+                                        <label class="section-label">4. Schedule Options</label>
+                                        <div class="schedule-toggle-container">
+                                            <div class="schedule-toggle-options">
+                                                <label class="toggle-option active">
+                                                    <input type="radio" name="post-schedule-type" value="now" checked>
+                                                    <span class="toggle-label"><i class="fa-solid fa-paper-plane"></i> Publish Now</span>
+                                                </label>
+                                                <label class="toggle-option">
+                                                    <input type="radio" name="post-schedule-type" value="later">
+                                                    <span class="toggle-label"><i class="fa-solid fa-calendar-plus"></i> Schedule for Later</span>
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <div id="datetime-picker-container" class="datetime-picker-container hidden">
+                                            <div class="form-group">
+                                                <label for="post-scheduled-time">Publication Date & Time</label>
+                                                <input type="datetime-local" id="post-scheduled-time">
+                                                <p class="help-text">Set the local date and time when this post will publish automatically.</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Form Action -->
+                                    <div class="form-actions">
+                                        <button type="submit" id="btn-submit-post" class="btn btn-primary btn-lg">
+                                            <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                            <span id="btn-submit-text">Publish Immediately</span>
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- C. POST HISTORY VIEW -->
+                    <section id="view-history" class="tab-view">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>Publishing History</h3>
+                                <button id="btn-refresh-history" class="btn btn-secondary btn-sm">
+                                    <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th>Layout</th>
+                                                <th>Content Preview</th>
+                                                <th>Scheduled / Published</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="posts-history-tbody">
+                                            <!-- Dynamically populated -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div id="history-empty-state" class="empty-state hidden">
+                                    <i class="fa-solid fa-folder-open"></i>
+                                    <h4>No posts found</h4>
+                                    <p>Create and publish or schedule your first post to see it here.</p>
+                                    <button class="btn btn-primary btn-sm" onclick="app.switchTab('create')">
+                                        Create a Post
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

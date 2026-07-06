@@ -1,0 +1,10 @@
+{
+  "Excited to share my latest insights on {topic}! Stay tuned for more updates.",
+  "Just published a new post about {topic}. Check it out!",
+  "I've been thinking a lot about {topic} lately. Here are my thoughts.",
+  "Thrilled to announce a new milestone in {topic}! Hard work pays off.",
+  "Learning never stops. Today I explored {topic} and wanted to share.",
+  "Happy to share my journey with {topic}. What a ride!",
+  "New blog post: Everything you need to know about {topic}.",
+  "I've been exploring {topic} and here's what I learned.",
+}
