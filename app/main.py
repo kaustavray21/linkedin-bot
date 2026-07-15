@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 
-from app.api import auth_router, generate_router, health_router, posts_router, profile_router, scheduler_router
+from app.api import auth_router, generate_router, health_router, posts_router, profile_router, scheduler_router, reference_router
 from app.api.deps import set_scheduler_service
 from app.core.config import settings
 from app.core.exceptions import AppException
@@ -37,6 +37,19 @@ async def lifespan(app: FastAPI):
     scheduler_service = SchedulerService()
     scheduler_service.start()
     set_scheduler_service(scheduler_service)
+
+    # Sync reference creators/posts from filesystem to DB
+    try:
+        from app.database.connection import get_session_factory
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            from app.services.reference_loader import sync_references_to_db
+            log.info("Synchronizing reference profiles to database...")
+            await sync_references_to_db(session)
+            await session.commit()
+            log.info("Reference profiles synchronized successfully.")
+    except Exception as e:
+        log.exception(f"Failed to synchronize references on startup: {e}")
 
     yield
 
@@ -83,6 +96,8 @@ app.include_router(profile_router)
 app.include_router(posts_router)
 app.include_router(scheduler_router)
 app.include_router(generate_router)
+app.include_router(reference_router)
+
 
 # Ensure uploads and static directories exist
 os.makedirs(settings.uploads_dir, exist_ok=True)

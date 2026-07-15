@@ -15,5 +15,6 @@ async def test_login_returns_auth_url(async_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_callback_missing_params(async_client: AsyncClient) -> None:
-    response = await async_client.get("/auth/callback")
-    assert response.status_code == 422
+    response = await async_client.get("/auth/callback", follow_redirects=False)
+    assert response.status_code == 307
+    assert "/?error=Missing" in response.headers["location"]

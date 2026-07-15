@@ -20,9 +20,18 @@ class AIService:
 
     # ------------------------------------------------------------------ text --
 
-    async def generate_content(self, topic: str | None = None) -> str:
+    async def generate_content(
+        self,
+        topic: str | None = None,
+        num_words: int | None = None,
+        num_paragraphs: int | None = None
+    ) -> str:
         if self.provider == "gemini" and settings.gemini_api_key:
-            return await self.generate_with_gemini(topic or "technology and innovation")
+            return await self.generate_with_gemini(
+                topic or "technology and innovation",
+                num_words=num_words,
+                num_paragraphs=num_paragraphs
+            )
         return self._template_content(topic)
 
     def _template_content(self, topic: str | None = None) -> str:
@@ -36,164 +45,100 @@ class AIService:
         template = random.choice(templates)
         return template.format(topic=topic or "technology and innovation")
 
-    async def generate_with_gemini(self, prompt: str) -> str:
+    async def generate_with_gemini(
+        self,
+        prompt: str,
+        num_words: int | None = None,
+        num_paragraphs: int | None = None
+    ) -> str:
         if not settings.gemini_api_key:
             log.warning("Gemini API key not set, falling back to template")
             return self._template_content(prompt)
 
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{settings.gemini_model}:generateContent"
-        )
+        instructions = "Write a short LinkedIn post"
+        if num_words:
+            instructions += f" targeting approximately {num_words} words"
+        else:
+            instructions += " (under 500 chars)"
+            
+        instructions += f" about: {prompt}."
+        
+        if num_paragraphs:
+            instructions += f" Format the post into exactly {num_paragraphs} paragraph blocks."
+            
+        instructions += " No hashtags. Just the post body."
+
         payload = {
             "contents": [{
-                "parts": [{"text": (
-                    f"Write a short LinkedIn post (under 500 chars) about: {prompt}. "
-                    "No hashtags. Just the post body."
-                )}]
+                "parts": [{"text": instructions}]
             }]
         }
         headers = {"Content-Type": "application/json"}
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                url,
-                params={"key": settings.gemini_api_key},
-                json=payload,
-                headers=headers,
-            )
-            if response.is_error:
-                log.error("Gemini API error", status=response.status_code, body=response.text[:300])
-                return self._template_content(prompt)
+        # Define model fallback order (only models confirmed available for this API key)
+        models_to_try = [settings.gemini_model, "gemini-3.5-flash", "gemini-2.5-flash-lite"]
+        # De-duplicate while maintaining order
+        unique_models = []
+        for m in models_to_try:
+            if m not in unique_models:
+                unique_models.append(m)
 
-            data = response.json()
-            text = (
-                data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [{}])[0]
-                    .get("text", "")
+        for model in unique_models:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent"
             )
-            if text:
-                return text.strip()
+            try:
+                log.info(f"Attempting text generation with Gemini model: {model}")
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.post(
+                        url,
+                        params={"key": settings.gemini_api_key},
+                        json=payload,
+                        headers=headers,
+                    )
+                    
+                    if response.status_code == 503:
+                        log.warning(f"Gemini model {model} currently experiencing high demand (503). Trying next fallback model...")
+                        continue
+                        
+                    if response.is_error:
+                        log.error("Gemini API error", status=response.status_code, model=model, body=response.text[:300])
+                        continue
 
+                    data = response.json()
+                    text = (
+                        data.get("candidates", [{}])[0]
+                            .get("content", {})
+                            .get("parts", [{}])[0]
+                            .get("text", "")
+                    )
+                    if text:
+                        return text.strip()
+            except Exception as e:
+                log.exception(f"Gemini API exception occurred for model {model}")
+                continue
+
+        log.error("All Gemini text generation models failed or were unavailable. Returning default template content.")
         return self._template_content(prompt)
 
     # ----------------------------------------------------------------- image --
 
     async def generate_image(self, prompt: str) -> str:
-        """Generate an image using OpenAI (DALL-E 3), Gemini, or Pollinations.
+        """Generate an image using fal.ai (Nano Banana 2) with Pollinations fallback.
 
         Returns the URL path of the saved image (e.g. /static/uploads/xxx.png).
         """
-        # A. Use OpenAI DALL-E 3 if API key is provided
-        if settings.openai_api_key:
-            log.info("Generating image via OpenAI DALL-E 3")
-            url = "https://api.openai.com/v1/images/generations"
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {settings.openai_api_key}"
-            }
-            payload = {
-                "model": "dall-e-3",
-                "prompt": prompt,
-                "n": 1,
-                "size": "1024x1024",
-                "response_format": "b64_json"
-            }
+        # A. Use fal.ai if API key is provided
+        if settings.fal_api_key:
             try:
-                async with httpx.AsyncClient(timeout=60) as client:
-                    response = await client.post(url, json=payload, headers=headers)
-                if response.is_error:
-                    log.error("OpenAI DALL-E 3 error", status=response.status_code, body=response.text[:500])
-                    raise RuntimeError(f"OpenAI Image generation failed: {response.text[:200]}")
-                
-                b64_data = response.json().get("data", [{}])[0].get("b64_json", "")
-                if not b64_data:
-                    raise RuntimeError("OpenAI DALL-E 3 returned empty image data")
-                return self._save_b64_image(b64_data)
+                log.info(f"Generating image via fal.ai {settings.fal_image_model}")
+                return await self._generate_fal(prompt)
             except Exception as e:
-                log.warning(f"OpenAI image generation failed ({e}). Falling back to free Pollinations AI...")
-                return await self._generate_pollinations(prompt)
+                log.exception("fal.ai image generation failed. Falling back to free Pollinations AI...")
 
-        # B. Use Pollinations AI directly if selected
-        if settings.gemini_image_model == 'pollinations':
-            return await self._generate_pollinations(prompt)
-
-        # C. Use Google GenAI/Gemini
-        if not settings.gemini_api_key:
-            log.warning("Gemini API Key is not configured. Falling back to free Pollinations AI...")
-            return await self._generate_pollinations(prompt)
-
-        try:
-            # Case 1: Dedicated Imagen model (e.g., imagen-4.0-generate-001) using :predict
-            if settings.gemini_image_model.startswith("imagen-"):
-                log.info(f"Generating image via Gemini Imagen: {settings.gemini_image_model}")
-                url = (
-                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{settings.gemini_image_model}:predict"
-                )
-                payload = {
-                    "instances": [{"prompt": prompt}],
-                    "parameters": {"sampleCount": 1},
-                }
-                async with httpx.AsyncClient(timeout=60) as client:
-                    response = await client.post(
-                        url,
-                        params={"key": settings.gemini_api_key},
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                if response.is_error:
-                    log.error("Gemini Imagen error", status=response.status_code, body=response.text[:500])
-                    raise RuntimeError(f"Imagen generation failed: {response.text[:200]}")
-                    
-                predictions = response.json().get("predictions", [])
-                if not predictions:
-                    raise RuntimeError("Imagen returned no predictions")
-                b64_data = predictions[0].get("bytesBase64Encoded", "")
-                if not b64_data:
-                    raise RuntimeError("Imagen returned empty image data")
-                    
-                return self._save_b64_image(b64_data)
-
-            # Case 2: Multimodal Gemini model using :generateContent
-            else:
-                log.info(f"Generating image via Gemini Multimodal: {settings.gemini_image_model}")
-                url = (
-                    f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{settings.gemini_image_model}:generateContent"
-                )
-                payload = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"responseModalities": ["IMAGE"]},
-                }
-                async with httpx.AsyncClient(timeout=60) as client:
-                    response = await client.post(
-                        url,
-                        params={"key": settings.gemini_api_key},
-                        json=payload,
-                        headers={"Content-Type": "application/json"},
-                    )
-                if response.is_error:
-                    log.error("Gemini Multimodal error", status=response.status_code, body=response.text[:500])
-                    raise RuntimeError(f"Gemini image generation failed: {response.text[:200]}")
-                    
-                data = response.json()
-                parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                b64_data = ""
-                for part in parts:
-                    inline = part.get("inlineData", {})
-                    if inline.get("mimeType", "").startswith("image/"):
-                        b64_data = inline.get("data", "")
-                        break
-                if not b64_data:
-                    raise RuntimeError("Gemini returned no image data")
-                    
-                return self._save_b64_image(b64_data)
-
-        except Exception as e:
-            log.warning(f"Gemini image generation failed ({e}). Falling back to free Pollinations AI...")
-            return await self._generate_pollinations(prompt)
+        # B. Fallback to free Pollinations AI
+        return await self._generate_pollinations(prompt)
 
     async def _generate_pollinations(self, prompt: str) -> str:
         """Fallback helper to generate an image using free keyless Pollinations AI."""
@@ -222,4 +167,28 @@ class AIService:
         file_path.write_bytes(data)
         log.info("Image saved", path=str(file_path))
         return f"/static/uploads/{filename}"
+
+    async def _generate_fal(self, prompt: str) -> str:
+        """Generate image via fal.ai Nano Banana 2 model and save locally."""
+        url = f"https://fal.run/{settings.fal_image_model}"
+        headers = {
+            "Authorization": f"Key {settings.fal_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"prompt": prompt}
+        async with httpx.AsyncClient(timeout=90) as client:
+            response = await client.post(url, json=payload, headers=headers)
+        if response.is_error:
+            log.error("fal.ai API error", status=response.status_code, body=response.text[:500])
+            raise RuntimeError(f"fal.ai error {response.status_code}: {response.text[:200]}")
+        data = response.json()
+        image_url = data.get("images", [{}])[0].get("url", "")
+        if not image_url:
+            raise RuntimeError("fal.ai returned no image URL")
+        # Download and save locally
+        async with httpx.AsyncClient(timeout=60) as client:
+            img_resp = await client.get(image_url)
+        if img_resp.is_error:
+            raise RuntimeError(f"Failed to download image from fal CDN: {img_resp.status_code}")
+        return self._save_raw_image(img_resp.content)
 

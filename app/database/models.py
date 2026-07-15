@@ -80,3 +80,27 @@ class ApiLog(Base):
     response: Mapped[str | None] = mapped_column(Text, nullable=True)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ReferenceProfile(Base):
+    __tablename__ = "reference_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    profile_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    posts: Mapped[list[ReferencePost]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+
+
+class ReferencePost(Base):
+    __tablename__ = "reference_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[int] = mapped_column(Integer, ForeignKey("reference_profiles.id", ondelete="CASCADE"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(100), nullable=False)
+    full_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    profile: Mapped[ReferenceProfile] = relationship(back_populates="posts")
+

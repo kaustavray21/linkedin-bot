@@ -92,10 +92,14 @@ const API = {
     // ------------------------------------------------------------- AI ENGINE --
 
     // Generate post text using Gemini
-    async generateText(prompt) {
+    async generateText(prompt, numWords = null, numParagraphs = null) {
         return this.request('/generate/text', {
             method: 'POST',
-            body: JSON.stringify({ prompt })
+            body: JSON.stringify({
+                prompt,
+                num_words: numWords,
+                num_paragraphs: numParagraphs
+            })
         });
     },
 
@@ -105,5 +109,52 @@ const API = {
             method: 'POST',
             body: JSON.stringify({ prompt })
         });
+    },
+
+    // ----------------------------------------------------------- STYLE WIZARD --
+
+    // List loaded reference profiles
+    async listReferenceProfiles() {
+        return this.request('/reference/profiles');
+    },
+
+    // List individual reference posts for a profile/slug
+    async listProfilePosts(slug) {
+        return this.request(`/reference/profile-posts/${slug}`);
+    },
+
+    // Get the extracted StyleProfile for a slug
+    async getStyleProfile(slug) {
+        return this.request(`/reference/style-profile/${slug}`);
+    },
+
+    // Generate style-conditioned post content
+    async generateStyledPost(topic, notes, slug, selectedPosts = null, numWords = null, numParagraphs = null, numVariations = 1, hookStyle = null, rhythm = null, wordType = null) {
+        return this.request('/generate/styled-post', {
+            method: 'POST',
+            body: JSON.stringify({
+                topic,
+                user_notes: notes,
+                profile_slug: slug,
+                selected_posts: selectedPosts,
+                num_words: numWords,
+                num_paragraphs: numParagraphs,
+                num_variations: numVariations,
+                hook_style: hookStyle,
+                line_rhythm: rhythm,
+                word_type: wordType
+            })
+        });
+    },
+
+    // Generate image from structured image prompt derived from post text
+    async generateStyledImage(postText) {
+        return this.request('/generate/styled-image', {
+            method: 'POST',
+            body: JSON.stringify({
+                post_text: postText
+            })
+        });
     }
 };
+

@@ -9,7 +9,9 @@ An AI-powered LinkedIn campaign publisher and scheduler. This application featur
 - **OAuth 2.0 Auth**: Secure, direct authentication with LinkedIn's developer portal.
 - **Glassmorphic SPA Dashboard**: Visual interface for posting, scheduling, viewing history, and tracking post metrics.
 - **AI Copywriter**: Generate high-converting text content using Gemini AI models (`gemini-2.0-flash`).
-- **AI Image Generator**: Generate custom illustrations using Gemini's image generation models (`gemini-3.1-flash-lite-image`).
+- **fal.ai Image Generator**: Primary premium image generation using the **Nano Banana 2** model via fal.ai.
+- **Style Wizard**: Curate reference posts locally, analyze structural style profiles (rhythms, hooks, CTAs), and generate original content matched to those profile styles.
+- **Structured Image Prompts**: Automatically derives a 7-element prompt (subject, action, background, framing, style, color, mood) from post text for high-fidelity images.
 - **Media Post Support**: Automated upload of images to the LinkedIn Media API for image-rich updates.
 - **Automated Scheduler**: Background APScheduler job that polls every minute and publishes due scheduled posts.
 - **Robust Structured Logging**: Loguru configuration with automatic request tracking that prevents formatting crashes.
@@ -86,6 +88,10 @@ APP_URL=http://localhost:8000
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_MODEL=gemini-2.0-flash
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+
+# fal.ai API
+FAL_API_KEY=your_fal_api_key
+FAL_IMAGE_MODEL=fal-ai/nano-banana-2
 ```
 
 ### 2. Set up the Python virtual environment
@@ -116,6 +122,12 @@ Your application will be live at 👉 **[http://localhost:8000/](http://localhos
 2. **Create Post Wizard**:
    - Select **Text Only** or **Text + AI Image** layouts.
    - Use the **AI Copywriter** to generate post drafts by providing a topic.
-   - Use the **Gemini Image Generator** to describe and preview custom illustrations.
+   - Use the **AI Image Generator** to describe and preview custom illustrations.
    - Toggle between **Publish Now** and **Schedule for Later** (select date/time).
-3. **Publication History**: Manage, refresh, publish drafts immediately, and delete historical logs.
+3. **Style Wizard**:
+   - Pick a reference creator profile (e.g. `sub1`, `sub2`, or blended `combined`) and review calculated style characteristics.
+   - Enter a topic and optional notes to generate a draft that matches the tone/structure style of the selected references.
+   - Auto-derive structured image prompts based on post text to generate a matching image via fal.ai Nano Banana 2.
+   - Review, edit, and click "Use This Post & Visual" to load it into the main Create Post tab.
+4. **Publication History**: Manage, refresh, publish drafts immediately, and delete historical logs.
+

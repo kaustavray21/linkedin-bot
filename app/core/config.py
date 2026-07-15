@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # fal.ai
+    fal_api_key: str = ""
+    fal_image_model: str = "fal-ai/nano-banana-2"
+
     # App
     debug: bool = False
 

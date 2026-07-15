@@ -1,0 +1,2 @@
+i want to use the fal.ai api key to generate images using the nanobanana available and to generate a prompt for the image section based on the pos. i have the fal api key Fal.ai ka api key
+0447321e-5791-43a7-986b-0ed676fc6595:51818477e8a6af5b429b29ae5d59edaa, which i have added in the .env file and also check @plan-2.md and create a comprehencsive plan to execute to create both ui updates for the new features and sude the neede-file folder files if needed move them to different directory or use the code to save tokens and change only the changes needed int he code

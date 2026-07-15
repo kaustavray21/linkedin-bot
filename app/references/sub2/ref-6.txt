@@ -1,0 +1,105 @@
+How to stop sounding like chatgpt in linkedin posts
+
+Most people don’t sound robotic
+because ai is bad.
+
+They sound robotic
+because they give ai nothing real.
+
+ai doesn’t make content fake.
+lack of context does.
+
+Here’s the shift that fixed it for me.
+
+I stopped asking ai to “write a linkedin post”
+and started feeding it my life.
+
+What actually works
+
+Before you ask ai to write anything,
+give it these 5 things.
+
+1. Real moment
+tell it what actually happened.
+
+not
+“write about consistency”
+
+But
+“i was sitting in my room at 2am, broke, staring at my calendar with zero calls booked”
+
+Raw moments create raw output.
+
+2. Your opinion
+not a lesson.
+
+ai defaults to teaching.
+you need to give it judgment.
+
+Tell it
+“i think most people give trash advice here”
+
+or
+“this made me angry”
+
+or
+“i realized i was lying to myself”
+
+opinions kill generic tone.
+
+3. What you would never say out loud
+this is the cheat code.
+
+Tell ai the insecure thought.
+the petty thought.
+the uncomfortable truth.
+
+Example
+
+“i was jealous of people winning while i felt stuck”
+
+that’s what makes it human.
+
+4. How you actually talk
+not how you think you should sound.
+
+Tell ai
+“write like i’m talking to a friend, not teaching a class”
+
+or
+
+“short lines, casual tone, no motivation talk”
+ai mirrors instructions perfectly.
+
+5. Who this is for
+one person. not everyone.
+
+Tell ai
+“this is for a 22-year-old agency owner making 80k a month and panicking”
+
+clarity sharpens voice.
+
+simple prompt structure i use
+
+“this is a real situation that happened to me:
+{story}
+this is my honest take on it:
+{opinion}
+
+this is the uncomfortable part i don’t usually say:
+{truth}
+
+Write this like a linkedin post.
+short lines.
+
+no generic advice.
+sound like me, not chatgpt.”
+that’s it.
+
+Ai doesn’t kill authenticity.
+lazy prompting does.
+
+Ps. if your post sounds like everyone else,
+It’s because you gave ai the same inputs as everyone else.
+
+What’s one thing you’ve never told ai about yourself but should?

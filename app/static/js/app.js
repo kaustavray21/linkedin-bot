@@ -117,6 +117,8 @@ class App {
             this.loadDashboardData();
         } else if (tabName === 'history') {
             this.loadHistory();
+        } else if (tabName === 'create') {
+            this.initCreatorProfiles();
         }
     }
 
@@ -176,7 +178,7 @@ class App {
             });
         });
 
-        // Generate AI Text Draft
+        // Generate AI Text Draft (Styled or Standard)
         document.getElementById('btn-generate-text').addEventListener('click', async () => {
             const promptInput = document.getElementById('ai-text-prompt');
             const prompt = promptInput.value.trim();
@@ -188,16 +190,70 @@ class App {
             const btn = document.getElementById('btn-generate-text');
             this.setButtonLoading(btn, true);
 
+            const slug = document.getElementById('create-profile-select').value;
+            const notes = document.getElementById('create-notes-input').value.trim();
+
+            const wordVal = document.getElementById('create-word-count').value;
+            const paraVal = document.getElementById('create-para-count').value.trim();
+            const numWords = wordVal === 'auto' ? null : parseInt(wordVal);
+            const numParagraphs = paraVal === '' ? null : parseInt(paraVal);
+            
+            const variationVal = document.getElementById('create-variation-count').value;
+            const numVariations = parseInt(variationVal);
+
+            // Read advanced overrides
+            const hookStyle = document.getElementById('create-hook-style').value;
+            const rhythm = document.getElementById('create-rhythm').value;
+            const wordType = document.getElementById('create-word-type').value;
+
+            // Read selected posts
+            const selectedPosts = [];
+            document.querySelectorAll('#creator-posts-list input[type="checkbox"]:checked').forEach(chk => {
+                selectedPosts.push(chk.value);
+            });
+
             try {
-                const response = await API.generateText(prompt);
-                textarea.value = response.content;
-                textarea.dispatchEvent(new Event('input')); // trigger char counter
-                this.showToast('Draft content generated!', 'success');
+                if (slug === 'none') {
+                    const response = await API.generateText(prompt, numWords, numParagraphs);
+                    textarea.value = response.content;
+                    textarea.dispatchEvent(new Event('input')); // trigger char counter
+                    document.getElementById('variations-selector-container').classList.add('hidden');
+                    this.showToast('Draft content generated!', 'success');
+                } else {
+                    const response = await API.generateStyledPost(
+                        prompt,
+                        notes,
+                        slug,
+                        selectedPosts.length > 0 ? selectedPosts : null,
+                        numWords,
+                        numParagraphs,
+                        numVariations,
+                        hookStyle,
+                        rhythm,
+                        wordType
+                    );
+                    const variations = response.variations;
+                    
+                    if (variations.length === 1) {
+                        textarea.value = variations[0];
+                        textarea.dispatchEvent(new Event('input')); // trigger char counter
+                        document.getElementById('variations-selector-container').classList.add('hidden');
+                        this.showToast('Draft content generated!', 'success');
+                    } else {
+                        this.renderVariationsPicker(variations);
+                        this.showToast(`Generated ${variations.length} drafts! Choose your favorite below.`, 'success');
+                    }
+                }
             } catch (error) {
                 this.showToast(error.message || 'Generation failed.', 'error');
             } finally {
                 this.setButtonLoading(btn, false);
             }
+        });
+
+        // Profile select change listener
+        document.getElementById('create-profile-select').addEventListener('change', (e) => {
+            this.loadCreatorStyleProfile(e.target.value);
         });
 
         // Generate AI Image
@@ -220,6 +276,32 @@ class App {
                 previewImg.src = response.image_url;
                 document.getElementById('image-preview-container').classList.remove('hidden');
                 this.showToast('Image generated!', 'success');
+            } catch (error) {
+                this.showToast(error.message || 'Image generation failed.', 'error');
+            } finally {
+                this.setButtonLoading(btn, false);
+            }
+        });
+
+        // Auto-derive prompt and generate image via fal.ai
+        document.getElementById('btn-derive-generate-image').addEventListener('click', async () => {
+            const postText = document.getElementById('post-text-content').value.trim();
+            if (!postText) {
+                this.showToast('No post text found. Please write or generate post text first.', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('btn-derive-generate-image');
+            this.setButtonLoading(btn, true);
+
+            try {
+                const response = await API.generateStyledImage(postText);
+                document.getElementById('generated-image-url').value = response.image_url;
+                
+                const previewImg = document.getElementById('image-preview');
+                previewImg.src = response.image_url;
+                document.getElementById('image-preview-container').classList.remove('hidden');
+                this.showToast('Derived prompt and generated image via fal.ai!', 'success');
             } catch (error) {
                 this.showToast(error.message || 'Image generation failed.', 'error');
             } finally {
@@ -526,6 +608,261 @@ class App {
                   .replace(/>/g, "&gt;")
                   .replace(/"/g, "&quot;")
                   .replace(/'/g, "&#039;");
+    }
+
+    // -------------------------------------------------------- CREATOR PROFILES --
+    async initCreatorProfiles() {
+        if (this.creatorProfilesInitialized) return;
+        
+        try {
+            const profiles = await API.listReferenceProfiles();
+            const select = document.getElementById('create-profile-select');
+            
+            // Clear existing options and rebuild list
+            select.innerHTML = `
+                <option value="combined">Combined / Blend of all profiles</option>
+                <option value="none">None (Standard generic generation)</option>
+            `;
+            
+            profiles.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.slug;
+                opt.textContent = `${p.slug} (${p.post_count} posts)`;
+                select.appendChild(opt);
+            });
+            
+            this.creatorProfilesInitialized = true;
+            this.loadCreatorStyleProfile('combined');
+        } catch (e) {
+            console.error("Failed to load reference profiles:", e);
+            this.showToast('Failed to load reference profiles from disk.', 'error');
+        }
+    }
+
+    async loadCreatorStyleProfile(slug) {
+        if (slug === 'none') {
+            document.getElementById('create-style-profile-viewer').classList.add('hidden');
+            document.getElementById('creator-individual-posts-container').classList.add('hidden');
+            return;
+        }
+        try {
+            // Load base directory profile style metrics
+            const defaultStyle = await API.getStyleProfile(slug);
+            this.activeDefaultStyle = defaultStyle; // store default metrics
+            
+            this.updateStyleProfileUI(defaultStyle);
+            document.getElementById('create-style-profile-viewer').classList.remove('hidden');
+
+            // Fetch and render individual posts checkboxes
+            const postsList = document.getElementById('creator-posts-list');
+            postsList.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted); padding: 4px;">Loading individual posts...</span>';
+            document.getElementById('creator-individual-posts-container').classList.remove('hidden');
+
+            const posts = await API.listProfilePosts(slug);
+            this.activePosts = posts; // store loaded posts
+            postsList.innerHTML = '';
+
+            if (posts.length === 0) {
+                postsList.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted); padding: 4px;">No reference posts found.</span>';
+            } else {
+                posts.forEach((post, index) => {
+                    const postCard = document.createElement('div');
+                    postCard.style.display = 'flex';
+                    postCard.style.alignItems = 'flex-start';
+                    postCard.style.gap = '10px';
+                    postCard.style.padding = '8px';
+                    postCard.style.border = '1px solid var(--border-color)';
+                    postCard.style.borderRadius = 'var(--radius-sm)';
+                    postCard.style.background = 'var(--bg-primary)';
+                    postCard.style.cursor = 'pointer';
+                    postCard.style.transition = 'all 0.2s';
+                    postCard.className = 'post-select-card';
+
+                    const cleanId = post.id;
+                    
+                    // Format display label: slug/filename -> filename
+                    const parts = post.id.split('/');
+                    const filename = parts[parts.length - 1];
+
+                    postCard.innerHTML = `
+                        <input type="checkbox" id="post-check-${index}" value="${cleanId}" style="margin-top: 3px; cursor: pointer;">
+                        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
+                            <label for="post-check-${index}" style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); cursor: pointer; margin: 0; display: flex; justify-content: space-between; align-items: center;">
+                                <span>${filename}</span>
+                                <span style="font-size: 0.7rem; font-weight: normal; color: var(--text-muted);">${post.slug}</span>
+                            </label>
+                            <span style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.25;">
+                                "${post.snippet.replace(/"/g, '&quot;')}"
+                            </span>
+                        </div>
+                    `;
+
+                    // Card click toggles checkbox
+                    postCard.addEventListener('click', (e) => {
+                        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') {
+                            const chk = postCard.querySelector('input');
+                            chk.checked = !chk.checked;
+                            chk.dispatchEvent(new Event('change'));
+                        }
+                    });
+
+                    const chk = postCard.querySelector('input');
+                    chk.addEventListener('change', () => {
+                        if (chk.checked) {
+                            postCard.style.borderColor = 'var(--accent-primary, #0a66c2)';
+                            postCard.style.background = 'rgba(10, 102, 194, 0.04)';
+                        } else {
+                            postCard.style.borderColor = 'var(--border-color)';
+                            postCard.style.background = 'var(--bg-primary)';
+                        }
+                        this.handleSelectedPostsChange();
+                    });
+
+                    postsList.appendChild(postCard);
+                });
+            }
+        } catch (e) {
+            console.error("Error loading style profile:", e);
+        }
+    }
+
+    updateStyleProfileUI(style) {
+        document.getElementById('create-style-metric-count').textContent = `${style.sample_count} post${style.sample_count === 1 ? '' : 's'}`;
+        document.getElementById('create-style-metric-words').textContent = Math.round(style.avg_word_count);
+        document.getElementById('create-style-metric-hook').textContent = style.hook_style.replace(/_/g, ' ');
+        document.getElementById('create-style-metric-rhythm').textContent = style.line_rhythm.replace(/_/g, ' ');
+    }
+
+    handleSelectedPostsChange() {
+        const checkedVals = [];
+        document.querySelectorAll('#creator-posts-list input[type="checkbox"]:checked').forEach(chk => {
+            checkedVals.push(chk.value);
+        });
+
+        if (checkedVals.length === 0) {
+            // Revert to folder-wide default style metrics
+            if (this.activeDefaultStyle) {
+                this.updateStyleProfileUI(this.activeDefaultStyle);
+            }
+            return;
+        }
+
+        // Calculate dynamic style metrics based on selected posts
+        const selectedPostsData = this.activePosts.filter(p => checkedVals.includes(p.id));
+        const dynamicStyle = this.calculateStyleFromPosts(selectedPostsData);
+        if (dynamicStyle) {
+            this.updateStyleProfileUI(dynamicStyle);
+        }
+    }
+
+    calculateStyleFromPosts(checkedPosts) {
+        if (checkedPosts.length === 0) return null;
+        
+        let totalWords = 0;
+        let totalLines = 0;
+        const hookStyles = [];
+        
+        checkedPosts.forEach(post => {
+            const words = post.full_text.split(/\s+/).filter(w => w.length > 0);
+            const lines = post.full_text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            
+            totalWords += words.length;
+            totalLines += lines.length;
+            
+            if (lines.length > 0) {
+                const firstLine = lines[0];
+                if (firstLine.endsWith('?')) {
+                    hookStyles.push('question');
+                } else if (/^\d/.test(firstLine)) {
+                    hookStyles.push('stat_or_number');
+                } else if (firstLine.split(/\s+/).length <= 8) {
+                    hookStyles.push('bold_statement');
+                } else {
+                    hookStyles.push('story_open');
+                }
+            }
+        });
+        
+        const avgWords = Math.round(totalWords / checkedPosts.length);
+        const avgLines = totalLines / checkedPosts.length;
+        
+        const mode = arr => {
+            const counts = {};
+            let maxCount = 0;
+            let maxVal = null;
+            arr.forEach(val => {
+                counts[val] = (counts[val] || 0) + 1;
+                if (counts[val] > maxCount) {
+                    maxCount = counts[val];
+                    maxVal = val;
+                }
+            });
+            return maxVal;
+        };
+        const commonHook = mode(hookStyles) || 'story_open';
+        const rhythm = (totalWords / Math.max(totalLines, 1)) < 12 ? 'short_punchy' : 'flowing_paragraphs';
+        
+        return {
+            sample_count: checkedPosts.length,
+            avg_word_count: avgWords,
+            hook_style: commonHook,
+            line_rhythm: rhythm
+        };
+    }
+
+    renderVariationsPicker(variations) {
+        const container = document.getElementById('variations-selector-container');
+        const tabsContainer = document.getElementById('variations-tabs');
+        const previewText = document.getElementById('variation-preview-text');
+        const useBtn = document.getElementById('btn-use-selected-variation');
+        const textarea = document.getElementById('post-text-content');
+
+        tabsContainer.innerHTML = '';
+        let activeIndex = 0;
+
+        const updatePreview = (idx) => {
+            activeIndex = idx;
+            previewText.textContent = variations[idx];
+            
+            // Highlight active tab button with inline styles for robustness
+            tabsContainer.querySelectorAll('.btn-tab').forEach((btn, i) => {
+                if (i === idx) {
+                    btn.style.background = 'var(--accent-primary, #0a66c2)';
+                    btn.style.borderColor = 'var(--accent-primary, #0a66c2)';
+                    btn.style.color = '#ffffff';
+                } else {
+                    btn.style.background = 'var(--bg-primary, #1d2226)';
+                    btn.style.borderColor = 'var(--border-color, #38434f)';
+                    btn.style.color = 'var(--text-secondary, #8f9ca7)';
+                }
+            });
+        };
+
+        variations.forEach((varText, idx) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-secondary btn-tab btn-sm';
+            btn.style.marginRight = '6px';
+            btn.textContent = `Draft ${idx + 1}`;
+            btn.addEventListener('click', () => updatePreview(idx));
+            tabsContainer.appendChild(btn);
+        });
+
+        // Set initial preview
+        updatePreview(0);
+
+        // Remove old event listeners by cloning button
+        const newUseBtn = useBtn.cloneNode(true);
+        useBtn.replaceWith(newUseBtn);
+
+        newUseBtn.addEventListener('click', () => {
+            textarea.value = variations[activeIndex];
+            textarea.dispatchEvent(new Event('input'));
+            container.classList.add('hidden');
+            this.showToast(`Draft ${activeIndex + 1} applied to post editor!`, 'success');
+        });
+
+        container.classList.remove('hidden');
     }
 }
 
