@@ -13,6 +13,35 @@ from app.core.logger import get_logger
 
 log = get_logger()
 
+# The canned copy returned when Gemini is unreachable or unconfigured. Kept at
+# module scope so callers can recognise a fallback result instead of mistaking
+# it for a real generation — see is_template_fallback().
+_FALLBACK_TEMPLATES = [
+    "Excited to share my latest insights on {topic}! Stay tuned for more updates.",
+    "Just published a new post about {topic}. Check it out!",
+    "I've been thinking a lot about {topic} lately. Here are my thoughts.",
+    "Thrilled to announce a new milestone in {topic}! Hard work pays off.",
+    "Learning never stops. Today I explored {topic} and wanted to share.",
+]
+
+_FALLBACK_FINGERPRINTS = tuple(
+    template.split("{topic}")[0].strip() for template in _FALLBACK_TEMPLATES
+)
+
+
+def is_template_fallback(text: str) -> bool:
+    """True when `text` is placeholder copy rather than a real generation.
+
+    AIService degrades to a canned template on a missing API key or an exhausted
+    model list. That is reasonable for a "give me something" call, but callers
+    doing quality-gated work need to tell the two apart — placeholder text passes
+    an originality check trivially while being useless to the user.
+    """
+    if not text:
+        return True
+    head = text.strip()
+    return any(head.startswith(prefix) for prefix in _FALLBACK_FINGERPRINTS)
+
 
 class AIService:
     def __init__(self, provider: str = "gemini") -> None:
@@ -35,14 +64,7 @@ class AIService:
         return self._template_content(topic)
 
     def _template_content(self, topic: str | None = None) -> str:
-        templates = [
-            "Excited to share my latest insights on {topic}! Stay tuned for more updates.",
-            "Just published a new post about {topic}. Check it out!",
-            "I've been thinking a lot about {topic} lately. Here are my thoughts.",
-            "Thrilled to announce a new milestone in {topic}! Hard work pays off.",
-            "Learning never stops. Today I explored {topic} and wanted to share.",
-        ]
-        template = random.choice(templates)
+        template = random.choice(_FALLBACK_TEMPLATES)
         return template.format(topic=topic or "technology and innovation")
 
     async def generate_with_gemini(
@@ -75,15 +97,7 @@ class AIService:
         }
         headers = {"Content-Type": "application/json"}
 
-        # Define model fallback order (only models confirmed available for this API key)
-        models_to_try = [settings.gemini_model, "gemini-3.5-flash", "gemini-2.5-flash-lite"]
-        # De-duplicate while maintaining order
-        unique_models = []
-        for m in models_to_try:
-            if m not in unique_models:
-                unique_models.append(m)
-
-        for model in unique_models:
+        for model in self._model_chain():
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model}:generateContent"
@@ -121,6 +135,80 @@ class AIService:
 
         log.error("All Gemini text generation models failed or were unavailable. Returning default template content.")
         return self._template_content(prompt)
+
+    # ---------------------------------------------------------------- vision --
+
+    async def describe_image_style(self, image_bytes: bytes, mime: str = "image/png") -> str:
+        """Describe an image's visual language — composition, palette, mood.
+
+        Used to make an original image that *feels* like a high-performing post's
+        visual without reproducing it. The description is deliberately about
+        style and never about specific subjects, text, logos or faces: those are
+        the parts that would make the output a copy rather than a homage, and
+        reproducing someone's brand marks is a separate problem from imitating
+        their aesthetic.
+        """
+        if not settings.gemini_api_key:
+            raise RuntimeError("Gemini API key is not configured")
+
+        instruction = (
+            "Describe this image's VISUAL STYLE only, for use as guidance when "
+            "creating a different, original image. Cover: composition and layout, "
+            "colour palette, lighting, texture or artistic medium, typography "
+            "treatment if any, and overall mood. "
+            "Do NOT describe or name specific people, faces, brands, logos, or any "
+            "text content in the image. Do not mention the subject matter. "
+            "Answer in two sentences, as a style brief."
+        )
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": instruction},
+                    {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode()}},
+                ]
+            }]
+        }
+
+        for model in self._model_chain():
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent"
+            )
+            try:
+                async with httpx.AsyncClient(timeout=45) as client:
+                    response = await client.post(
+                        url,
+                        params={"key": settings.gemini_api_key},
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                    )
+                if response.is_error:
+                    log.warning("Gemini vision error", status=response.status_code, model=model)
+                    continue
+                text = (
+                    response.json()
+                    .get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                )
+                if text:
+                    return text.strip()
+            except Exception:
+                log.exception(f"Gemini vision call failed for model {model}")
+                continue
+
+        raise RuntimeError("Could not describe the image with any available model")
+
+    def _model_chain(self) -> list[str]:
+        """Configured model first, then known-good fallbacks, de-duplicated."""
+        chain = [settings.gemini_model, "gemini-3.5-flash", "gemini-2.5-flash-lite"]
+        unique: list[str] = []
+        for model in chain:
+            if model and model not in unique:
+                unique.append(model)
+        return unique
 
     # ----------------------------------------------------------------- image --
 

@@ -6,7 +6,7 @@ from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_styled_post_endpoint_variations(async_client: AsyncClient) -> None:
+async def test_styled_post_endpoint_variations(async_client: AsyncClient, seeded_references) -> None:
     with patch("app.services.ai_service.AIService.generate_with_gemini") as mock_gen:
         mock_gen.return_value = "Mocked generated post content"
         
@@ -28,7 +28,7 @@ async def test_styled_post_endpoint_variations(async_client: AsyncClient) -> Non
 
 
 @pytest.mark.asyncio
-async def test_list_profile_posts(async_client: AsyncClient) -> None:
+async def test_list_profile_posts(async_client: AsyncClient, seeded_references) -> None:
     response = await async_client.get("/reference/profile-posts/sub1")
     assert response.status_code == 200
     data = response.json()
@@ -41,7 +41,7 @@ async def test_list_profile_posts(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_styled_post_with_advanced_overrides(async_client: AsyncClient) -> None:
+async def test_styled_post_with_advanced_overrides(async_client: AsyncClient, seeded_references) -> None:
     with patch("app.services.ai_service.AIService.generate_with_gemini") as mock_gen:
         mock_gen.return_value = "Custom style post content"
         
@@ -64,9 +64,16 @@ async def test_styled_post_with_advanced_overrides(async_client: AsyncClient) ->
         assert len(data["variations"]) == 1
         assert data["variations"][0] == "Custom style post content"
         mock_gen.assert_called_once()
-        # Verify custom prompt includes instructions
         called_prompt = mock_gen.call_args[0][0]
+
         assert "question" in called_prompt.lower()
-        assert "short punchy" in called_prompt.lower()
         assert "simple, clear, and direct vocabulary" in called_prompt.lower()
+
+        # line_rhythm no longer steers the prompt. The exemplar's own skeleton
+        # decides paragraphing now — passing an aggregate rhythm label was part
+        # of what produced uniform, generic output. What must be present instead
+        # is the per-block template and the fenced exemplar.
+        assert "## Structure you must reproduce" in called_prompt
+        assert "Block 1:" in called_prompt
+        assert "STRUCTURE_REFERENCE" in called_prompt
 

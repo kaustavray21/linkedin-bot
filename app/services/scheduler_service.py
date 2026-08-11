@@ -48,6 +48,13 @@ class SchedulerService:
                 id="poll_scheduled_posts",
                 replace_existing=True,
             )
+            self.scheduler.add_job(
+                self._purge_expired_discoveries,
+                "interval",
+                hours=6,
+                id="purge_expired_discoveries",
+                replace_existing=True,
+            )
             self.scheduler.start()
             self._running = True
             log.info("Scheduler started")
@@ -74,6 +81,26 @@ class SchedulerService:
             except Exception as e:
                 log.error(f"Error in scheduled post polling: {e}")
 
+    async def _purge_expired_discoveries(self) -> None:
+        """Drop third-party post content past its retention window.
+
+        Commits explicitly — the surrounding session factory does not, and a
+        purge that rolls back silently would leave content sitting past its
+        retention date while the logs claim it was removed.
+        """
+        from app.database.connection import get_session_factory
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            try:
+                from app.services.discovery.service import purge_expired
+
+                purged = await purge_expired(session)
+                if purged:
+                    await session.commit()
+            except Exception as e:
+                log.error(f"Error purging expired discovered posts: {e}")
+                await session.rollback()
 
     def stop(self) -> None:
         if self._running:

@@ -107,6 +107,7 @@ class App {
         // Set Top bar title
         const titles = {
             dashboard: 'Dashboard Overview',
+            discover: 'Discover Top Posts',
             create: 'Create Campaign Post',
             history: 'Publication History'
         };
@@ -119,7 +120,197 @@ class App {
             this.loadHistory();
         } else if (tabName === 'create') {
             this.initCreatorProfiles();
+        } else if (tabName === 'discover') {
+            this.loadDiscoveryStatus();
+            this.loadDiscoveredPosts();
         }
+    }
+
+    // 2b. DISCOVERY
+
+    async loadDiscoveryStatus() {
+        const badge = document.getElementById('discovery-provider-badge');
+        const note = document.getElementById('discovery-budget-note');
+        try {
+            const status = await API.getDiscoveryStatus();
+            badge.textContent = `${status.provider} · ${status.egress}`;
+
+            const openCircuits = Object.entries(status.circuits || {})
+                .filter(([, c]) => c.open)
+                .map(([name]) => name);
+
+            let text = `${status.remaining_today} of ${status.daily_cap} reads left today. `
+                     + 'Posts are read without signing in — your LinkedIn account is never used.';
+            if (openCircuits.length) {
+                // Surfaced rather than hidden: silently returning nothing would
+                // look like "no posts exist" instead of "we are backing off".
+                text += ` Paused for: ${openCircuits.join(', ')} (rate limited).`;
+            }
+            note.textContent = text;
+        } catch (error) {
+            badge.textContent = 'unavailable';
+        }
+    }
+
+    // Follow a background discovery job, refreshing the list as posts land.
+    // Reads are paced ~30s apart on purpose, so a 10-post run takes >5 minutes;
+    // showing results incrementally is what keeps that bearable.
+    async followDiscoveryJob(jobId, topic) {
+        const status = document.getElementById('discovery-status');
+        const deadlineMs = Date.now() + 15 * 60 * 1000;
+
+        while (Date.now() < deadlineMs) {
+            let job;
+            try {
+                job = await API.getDiscoveryJob(jobId);
+            } catch (error) {
+                status.textContent = 'Lost track of the discovery job.';
+                return;
+            }
+
+            const done = ['success', 'partial', 'failed'].includes(job.status);
+
+            status.textContent =
+                `${job.status} · found ${job.found_count}, read ${job.fetched_count}`
+                + (job.parse_failures ? `, ${job.parse_failures} unreadable` : '')
+                + (done ? '' : ' — reads are spaced out to stay within safe limits…')
+                + (job.error ? ` — ${job.error}` : '');
+
+            await this.loadDiscoveredPosts();
+
+            if (done) {
+                await this.loadDiscoveryStatus();
+                if (job.status === 'failed') {
+                    this.showToast(job.error || 'Discovery failed.', 'error');
+                } else if (job.fetched_count > 0) {
+                    this.showToast(`Discovery ${job.status} — ${job.fetched_count} post(s) read.`, 'success');
+                }
+                return;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 4000));
+        }
+
+        status.textContent += ' (stopped watching — the job is still running in the background)';
+    }
+
+    async loadDiscoveredPosts() {
+        const list = document.getElementById('discovered-list');
+        const empty = document.getElementById('discovered-empty');
+        const sort = document.getElementById('discover-sort').value;
+        const keyword = document.getElementById('discover-topic').value.trim() || null;
+
+        try {
+            const posts = await API.listDiscoveredPosts(keyword, sort);
+            list.innerHTML = '';
+
+            if (!posts.length) {
+                empty.classList.remove('hidden');
+                return;
+            }
+            empty.classList.add('hidden');
+
+            posts.forEach(post => list.appendChild(this.buildDiscoveredCard(post)));
+        } catch (error) {
+            this.showToast(error.message || 'Could not load discovered posts.', 'error');
+        }
+    }
+
+    buildDiscoveredCard(post) {
+        const card = document.createElement('div');
+        card.className = 'discovered-card';
+
+        const metrics = [];
+        if (post.reactions !== null) metrics.push(`${post.reactions} reactions`);
+        if (post.comments !== null) metrics.push(`${post.comments} comments`);
+        if (post.reposts !== null) metrics.push(`${post.reposts} reposts`);
+
+        // Never present a relevance guess as if it were a measured number.
+        const basis = post.metrics_source === 'measured'
+            ? (metrics.join(' · ') || 'measured')
+            : 'ranked by relevance';
+
+        const preview = (post.content_text || post.snippet || '(content removed)')
+            .slice(0, 260);
+
+        card.innerHTML = `
+            <div class="discovered-head">
+                <div>
+                    <strong>${this.escapeHtml(post.author_name || 'Unknown author')}</strong>
+                    <span class="discovered-basis ${post.metrics_source}">${this.escapeHtml(basis)}</span>
+                </div>
+                <a href="${this.escapeHtml(post.post_url)}" target="_blank" rel="noopener noreferrer"
+                   class="btn btn-secondary btn-sm">Open ↗</a>
+            </div>
+            <p class="discovered-preview">${this.escapeHtml(preview)}</p>
+            <div class="discovered-actions">
+                <button type="button" class="btn btn-primary btn-sm" data-action="remix" data-id="${post.id}">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Draft one like this
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" data-action="delete" data-id="${post.id}">
+                    <i class="fa-solid fa-trash"></i> Delete
+                </button>
+            </div>
+        `;
+
+        card.querySelector('[data-action="remix"]').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const topic = document.getElementById('discover-topic').value.trim() || post.keyword;
+            btn.disabled = true;
+            try {
+                const result = await API.remixPost(topic, post.id);
+                this.applyRemixResult(result);
+            } catch (error) {
+                this.showToast(error.message || 'Could not draft that post.', 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        card.querySelector('[data-action="delete"]').addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            try {
+                await API.deleteDiscoveredPost(post.id);
+                this.showToast('Post content deleted.', 'success');
+                this.loadDiscoveredPosts();
+            } catch (error) {
+                this.showToast(error.message || 'Could not delete that post.', 'error');
+                btn.disabled = false;
+            }
+        });
+
+        return card;
+    }
+
+    // Moves a finished draft into the Create tab, ready for review and publish.
+    applyRemixResult(result) {
+        const textarea = document.getElementById('post-text-content');
+        textarea.value = result.full_text || result.text;
+        textarea.dispatchEvent(new Event('input'));   // refresh the char counter
+
+        if (result.image_url) {
+            this.applyImage(result.image_url);
+        }
+
+        this.switchTab('create');
+
+        const band = result.similarity_band || 'unknown';
+        const overlap = result.similarity_jaccard !== null
+            ? ` (overlap ${result.similarity_jaccard.toFixed(3)})`
+            : '';
+        this.showToast(
+            `Draft ready — originality: ${band}${overlap}`,
+            band === 'green' ? 'success' : 'warning'
+        );
+
+        (result.notes || []).forEach(note => this.showToast(note, 'info'));
+    }
+
+    escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
     }
 
     // 3. LISTENERS
@@ -158,24 +349,64 @@ class App {
             }
         });
 
-        // Post Type Selector
-        document.querySelectorAll('.post-type-selector .type-card').forEach(card => {
-            card.addEventListener('click', (e) => {
-                document.querySelectorAll('.post-type-selector .type-card').forEach(c => c.classList.remove('active'));
-                const selectedCard = e.currentTarget;
-                selectedCard.classList.add('active');
+        // Image source tabs — AI / Upload / URL.
+        // These switch where the image comes from; they never gate whether one
+        // is required. A post can still be published with no image at all.
+        document.querySelectorAll('#image-source-tabs .img-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                const source = e.currentTarget.getAttribute('data-source');
 
-                const type = selectedCard.getAttribute('data-type');
-                const imgSection = document.getElementById('image-generation-section');
-                
-                if (type === 'image_text') {
-                    imgSection.classList.remove('hidden');
-                } else {
-                    imgSection.classList.add('hidden');
-                    // Reset generated image
-                    this.clearGeneratedImage();
-                }
+                document.querySelectorAll('#image-source-tabs .img-tab')
+                    .forEach(t => t.classList.toggle('active', t === e.currentTarget));
+
+                document.querySelectorAll('.img-panel').forEach(panel => {
+                    panel.classList.toggle('hidden', panel.getAttribute('data-panel') !== source);
+                });
             });
+        });
+
+        // Upload from device
+        const fileInput = document.getElementById('image-file-input');
+        document.getElementById('btn-choose-file').addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files && fileInput.files[0];
+            if (!file) return;
+
+            const btn = document.getElementById('btn-choose-file');
+            this.setButtonLoading(btn, true);
+            try {
+                const response = await API.uploadImage(file);
+                this.applyImage(response.image_url);
+                this.showToast('Image uploaded.', 'success');
+            } catch (error) {
+                this.showToast(error.message || 'Upload failed.', 'error');
+            } finally {
+                this.setButtonLoading(btn, false);
+                fileInput.value = '';   // allow re-picking the same file
+            }
+        });
+
+        // Fetch from a web URL
+        document.getElementById('btn-fetch-image-url').addEventListener('click', async () => {
+            const input = document.getElementById('image-url-input');
+            const url = input.value.trim();
+            if (!url) {
+                this.showToast('Paste an image URL first.', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('btn-fetch-image-url');
+            this.setButtonLoading(btn, true);
+            try {
+                const response = await API.fetchImageFromUrl(url);
+                this.applyImage(response.image_url);
+                this.showToast('Image fetched.', 'success');
+            } catch (error) {
+                this.showToast(error.message || 'Could not fetch that image.', 'error');
+            } finally {
+                this.setButtonLoading(btn, false);
+            }
         });
 
         // Generate AI Text Draft (Styled or Standard)
@@ -270,11 +501,7 @@ class App {
 
             try {
                 const response = await API.generateImage(prompt);
-                document.getElementById('generated-image-url').value = response.image_url;
-                
-                const previewImg = document.getElementById('image-preview');
-                previewImg.src = response.image_url;
-                document.getElementById('image-preview-container').classList.remove('hidden');
+                this.applyImage(response.image_url);
                 this.showToast('Image generated!', 'success');
             } catch (error) {
                 this.showToast(error.message || 'Image generation failed.', 'error');
@@ -296,11 +523,7 @@ class App {
 
             try {
                 const response = await API.generateStyledImage(postText);
-                document.getElementById('generated-image-url').value = response.image_url;
-                
-                const previewImg = document.getElementById('image-preview');
-                previewImg.src = response.image_url;
-                document.getElementById('image-preview-container').classList.remove('hidden');
+                this.applyImage(response.image_url);
                 this.showToast('Derived prompt and generated image via fal.ai!', 'success');
             } catch (error) {
                 this.showToast(error.message || 'Image generation failed.', 'error');
@@ -336,6 +559,69 @@ class App {
             await this.handlePostSubmit();
         });
 
+        // Discover — find posts for a topic
+        document.getElementById('btn-discover-search').addEventListener('click', async () => {
+            const topic = document.getElementById('discover-topic').value.trim();
+            if (!topic) {
+                this.showToast('Enter a topic first.', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('btn-discover-search');
+            const status = document.getElementById('discovery-status');
+            this.setButtonLoading(btn, true);
+            status.classList.remove('hidden');
+            status.textContent = `Searching for posts about "${topic}"…`;
+
+            try {
+                const job = await API.discoverPosts(topic, 10);
+                // The endpoint returns as soon as the job is queued. Reads are
+                // paced ~30s apart deliberately, so a full run takes minutes —
+                // poll and show each post as it lands rather than freezing.
+                await this.followDiscoveryJob(job.id, topic);
+            } catch (error) {
+                status.textContent = error.message || 'Discovery failed.';
+                this.showToast(error.message || 'Discovery failed.', 'error');
+            } finally {
+                this.setButtonLoading(btn, false);
+            }
+        });
+
+        // Discover — the fully automatic path
+        document.getElementById('btn-auto-draft').addEventListener('click', async () => {
+            const topic = document.getElementById('discover-topic').value.trim();
+            if (!topic) {
+                this.showToast('Enter a topic first.', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('btn-auto-draft');
+            const status = document.getElementById('discovery-status');
+            this.setButtonLoading(btn, true);
+            status.classList.remove('hidden');
+            status.textContent = `Finding top posts about "${topic}" and drafting one like them…`;
+
+            try {
+                const result = await API.generateFromTopic(topic);
+                status.textContent = (result.notes || []).join(' ');
+                this.applyRemixResult(result);
+                await this.loadDiscoveryStatus();
+            } catch (error) {
+                status.textContent = error.message || 'Could not produce a draft.';
+                this.showToast(error.message || 'Could not produce a draft.', 'error');
+            } finally {
+                this.setButtonLoading(btn, false);
+            }
+        });
+
+        document.getElementById('discover-sort').addEventListener('change', () => {
+            this.loadDiscoveredPosts();
+        });
+
+        document.getElementById('btn-refresh-discovered').addEventListener('click', () => {
+            this.loadDiscoveredPosts();
+        });
+
         // Refresh History button
         document.getElementById('btn-refresh-history').addEventListener('click', () => {
             this.loadHistory();
@@ -347,6 +633,15 @@ class App {
         document.getElementById('generated-image-url').value = '';
         document.getElementById('image-preview').src = '';
         document.getElementById('image-preview-container').classList.add('hidden');
+    }
+
+    // Single place where an image becomes "the post's image", whatever its
+    // source. AI generation, upload and URL fetch all resolve to the same local
+    // /static/uploads path, so the publish path treats them identically.
+    applyImage(imageUrl) {
+        document.getElementById('generated-image-url').value = imageUrl;
+        document.getElementById('image-preview').src = imageUrl;
+        document.getElementById('image-preview-container').classList.remove('hidden');
     }
 
     setButtonLoading(btnElement, isLoading) {

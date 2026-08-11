@@ -111,6 +111,91 @@ const API = {
         });
     },
 
+    // ------------------------------------------------------------- DISCOVERY --
+
+    // Configured provider, egress, and how much fetch budget is left today.
+    async getDiscoveryStatus() {
+        return this.request('/discovery/status');
+    },
+
+    // Find posts for a topic. Returns a job row with real counts.
+    async discoverPosts(keyword, limit = 10) {
+        return this.request('/discovery/search', {
+            method: 'POST',
+            body: JSON.stringify({ keyword, limit })
+        });
+    },
+
+    // Progress of a background discovery job.
+    async getDiscoveryJob(jobId) {
+        return this.request(`/discovery/jobs/${jobId}`);
+    },
+
+    async listDiscoveredPosts(keyword = null, sort = 'engagement') {
+        const params = new URLSearchParams({ sort });
+        if (keyword) params.append('keyword', keyword);
+        return this.request(`/discovery/posts?${params.toString()}`);
+    },
+
+    // Purges content but keeps the anonymous layout fingerprint.
+    async deleteDiscoveredPost(postId) {
+        return this.request(`/discovery/posts/${postId}`, { method: 'DELETE' });
+    },
+
+    async markDiscoveredReviewed(postId) {
+        return this.request(`/discovery/posts/${postId}/reviewed`, { method: 'POST' });
+    },
+
+    // Topic in, draft out — discovery plus remix in one call.
+    async generateFromTopic(topic, notes = '', withImage = true) {
+        return this.request('/generate/from-topic', {
+            method: 'POST',
+            body: JSON.stringify({ topic, user_notes: notes, with_image: withImage })
+        });
+    },
+
+    // Draft a post shaped like one specific discovered post.
+    async remixPost(topic, exemplarId, notes = '', withImage = true) {
+        return this.request('/generate/remix', {
+            method: 'POST',
+            body: JSON.stringify({
+                topic,
+                exemplar_id: exemplarId,
+                user_notes: notes,
+                with_image: withImage
+            })
+        });
+    },
+
+    // ----------------------------------------------------------------- MEDIA --
+
+    // Upload an image from the user's device.
+    // Note: no Content-Type header is set on purpose — the browser must add its
+    // own multipart boundary, and setting the header manually strips it, which
+    // makes the request unparseable server-side.
+    async uploadImage(file) {
+        const userId = this.getUserId();
+        const body = new FormData();
+        body.append('file', file);
+
+        const url = userId ? `/media/upload?user_id=${userId}` : '/media/upload';
+        const response = await fetch(url, { method: 'POST', body });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `Upload failed: ${response.statusText}`);
+        }
+        return await response.json();
+    },
+
+    // Fetch an image from a public web URL.
+    async fetchImageFromUrl(url) {
+        return this.request('/media/from-url', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
+    },
+
     // ----------------------------------------------------------- STYLE WIZARD --
 
     // List loaded reference profiles

@@ -1,3 +1,7 @@
+# Working notes — contain API keys pasted during planning. Never commit.
+notes/
+scratch/
+
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -12,3 +16,9 @@ logs/
 .sweep_backup/
 bot-env/
 project_local_knowledge_base/
+.claude/settings.local.json
+
+# Ānvīkṣikī — catalogues live in ~/.anvideck (anvi_artifacts); .anvi here is a symlink
+.anvi
+artifacts/
+ref/sources/

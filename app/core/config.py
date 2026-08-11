@@ -45,6 +45,47 @@ class Settings(BaseSettings):
     fal_api_key: str = ""
     fal_image_model: str = "fal-ai/nano-banana-2"
 
+    # Media input limits
+    max_upload_bytes: int = 8 * 1024 * 1024
+    media_fetch_timeout: int = 10
+
+    # Style fidelity — similarity gate. Tune these against real output; see
+    # scripts/tune_similarity.py for the score distribution on your references.
+    similarity_jaccard_max: float = 0.25
+    similarity_max_word_run: int = 8
+    similarity_max_retries: int = 2
+
+    # Discovery — provider selection
+    discovery_provider: str = "ddg"          # ddg | searxng | manual
+    searxng_url: str = "http://localhost:8080"
+
+    # Discovery — network egress for the post-fetch step (see plan 3.5.1).
+    # Defaults to `direct`; flip to `jina` once verified, without code changes.
+    discovery_egress: str = "direct"          # direct | jina | proxy
+    discovery_egress_fallback: str = "direct"
+    discovery_proxy_url: str = ""
+    jina_reader_base: str = "https://r.jina.ai"
+
+    # Discovery — throttles. Enforced above the egress layer so they apply
+    # identically to every strategy.
+    discovery_min_interval_seconds: float = 30.0
+    discovery_jitter_seconds: float = 10.0
+    discovery_daily_fetch_cap: int = 40
+    discovery_circuit_threshold: int = 3
+    discovery_circuit_cooldown_hours: int = 24
+    discovery_fetch_timeout: int = 20
+
+    # Discovery — retention
+    discovery_retention_days: int = 90
+
+    # Ranking weights (hybrid score — see plan 3.9)
+    rank_w_reactions: float = 1.0
+    rank_w_comments: float = 1.5
+    rank_w_reposts: float = 2.0
+    rank_w_serp: float = 3.0
+    rank_w_recency: float = 2.0
+    rank_w_overlap: float = 1.0
+
     # App
     debug: bool = False
 
