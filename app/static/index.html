@@ -393,6 +393,30 @@
                                      <!-- Review & Edit Post Body (Step 2) -->
                                      <div class="form-section" data-section="body">
                                          <label class="section-label" for="post-text-content">2. Review & Edit Post Body</label>
+
+                                         <!-- Where the draft came from. Populated by a remix; hidden
+                                              otherwise. Kept above the textarea so it stays visible
+                                              while the image stage is still running. -->
+                                         <p id="exemplar-attribution" class="exemplar-attribution hidden"></p>
+
+                                         <!-- Staged handoff: the tab switches on click, so these two
+                                              stand in for the draft while it is being made. The
+                                              skeleton replaces the textarea during stage 1 only —
+                                              once the body lands it is editable even though stage 2
+                                              (the image) is still running, which is the whole point
+                                              of splitting the calls. -->
+                                         <div id="draft-staging" class="draft-staging hidden">
+                                             <i class="fa-solid fa-gear fa-spin"></i>
+                                             <span id="draft-staging-label"></span>
+                                         </div>
+                                         <div id="body-skeleton" class="body-skeleton hidden" aria-hidden="true">
+                                             <div class="skel-line"></div>
+                                             <div class="skel-line"></div>
+                                             <div class="skel-line short"></div>
+                                             <div class="skel-line"></div>
+                                             <div class="skel-line short"></div>
+                                         </div>
+
                                          <div class="textarea-container">
                                              <textarea id="post-text-content" rows="6" placeholder="What do you want to share today? Or generate one above..." required></textarea>
                                              <div class="textarea-footer">

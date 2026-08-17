@@ -1641,6 +1641,60 @@ confirm-modal {
     100% { background-position: 0 50%; }
 }
 
+/* ---------------------------------------------------------------------------
+   STAGED HANDOFF — the drafting state inside the Post Body section
+   The tab switches on click, before either generation call, so this is what
+   fills the section while the draft is being written.
+   --------------------------------------------------------------------------- */
+
+.draft-staging {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.body-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+/* Same sweep as the discovery skeleton — one loading vocabulary across the
+   app, so a shimmer always means "this is coming", never "this is broken". */
+.skel-line {
+    height: 14px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.02) 25%,
+        rgba(255, 255, 255, 0.06) 37%,
+        rgba(255, 255, 255, 0.02) 63%
+    );
+    background-size: 400% 100%;
+    animation: skel-sweep 1.4s ease infinite;
+}
+
+.skel-line.short { width: 62%; }
+
+.exemplar-attribution {
+    margin: 0 0 12px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.exemplar-attribution a {
+    color: var(--text-secondary);
+    text-decoration: underline;
+}
+
 .discovered-pager {
     display: flex;
     align-items: center;

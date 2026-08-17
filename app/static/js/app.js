@@ -427,10 +427,10 @@ class App {
             const topic = document.getElementById('discover-topic').value.trim() || post.keyword;
             btn.disabled = true;
             try {
-                const result = await API.remixPost(topic, post.id);
-                this.applyRemixResult(result);
-            } catch (error) {
-                this.showToast(error.message || 'Could not draft that post.', 'error');
+                // with_image=false: the image is stage 2, made from the text
+                // that comes back here. Asking for it now would fold both waits
+                // into one and put us back where we started.
+                await this.runStagedHandoff(() => API.remixPost(topic, post.id, '', false));
             } finally {
                 btn.disabled = false;
             }
@@ -452,29 +452,132 @@ class App {
         return card;
     }
 
-    // Moves a finished draft into the Create tab, ready for review and publish.
+    // ------------------------------------------------------------- HANDOFF --
+    // Opening the editor and filling it are two different things, and they used
+    // to be one: the tab only switched after the whole generation finished, so
+    // a click on Discover left you watching a disabled button for 20-60s.
+    // openHandoff() runs on the click itself; the result arrives later.
+
+    // Clears the editor and shows it, ready to receive a generated draft.
+    // Order is load-bearing: switchTab('create') hides the editor when the
+    // textarea is empty (the launcher case, :143-145), which is exactly the
+    // state startNewPost() leaves behind. Reset first and the launcher wins.
+    openHandoff() {
+        this.switchTab('create');
+        this.startNewPost();
+        // Land on the body section — that is where the draft will arrive.
+        this.showSection('body');
+    }
+
+    // Which stage of the handoff is running, or null when nothing is.
+    // 'writing' hides the textarea behind a skeleton because there is nothing
+    // to edit yet. 'image' does NOT — the body has landed and is editable while
+    // the picture is still being made, which is the reason the calls are split.
+    setDraftStage(stage) {
+        const banner = document.getElementById('draft-staging');
+        const label = document.getElementById('draft-staging-label');
+        const skeleton = document.getElementById('body-skeleton');
+        const editor = document.querySelector('.textarea-container');
+
+        const messages = {
+            writing: 'Writing the draft…',
+            image: 'Draft ready — generating an image…',
+        };
+
+        banner.classList.toggle('hidden', !stage);
+        if (stage) label.textContent = messages[stage] || '';
+        skeleton.classList.toggle('hidden', stage !== 'writing');
+        editor.classList.toggle('hidden', stage === 'writing');
+    }
+
+    // Where a remixed draft came from. Shown as plain text when there is no
+    // URL, so a missing link degrades to a name rather than a dead anchor.
+    showExemplarAttribution(url, author) {
+        const el = document.getElementById('exemplar-attribution');
+        el.textContent = '';
+        if (!url && !author) {
+            el.classList.add('hidden');
+            return;
+        }
+
+        el.appendChild(document.createTextNode('Shaped after a post'));
+        if (author) el.appendChild(document.createTextNode(` by ${author}`));
+        if (url) {
+            el.appendChild(document.createTextNode(' — '));
+            const link = document.createElement('a');
+            link.href = url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'view the original ↗';
+            el.appendChild(link);
+        }
+        el.classList.remove('hidden');
+    }
+
+    // Runs a generation in two visible stages. `stage1` must be a call made with
+    // with_image=false: an imageless draft is already useful, and an image
+    // failure is a downgrade rather than an error (remix_service.py:166-168),
+    // so the body is handed over as soon as it exists.
+    async runStagedHandoff(stage1) {
+        this.openHandoff();
+        this.setDraftStage('writing');
+
+        let result;
+        try {
+            result = await stage1();
+        } catch (error) {
+            this.setDraftStage(null);
+            this.showToast(error.message || 'Could not produce a draft.', 'error');
+            return null;
+        }
+
+        this.applyRemixResult(result);
+        this.setDraftStage('image');
+
+        // Stage 2. Its failure leaves an editable draft plus a note — it must
+        // never take the body down with it.
+        try {
+            const image = await API.generateStyledImage(
+                document.getElementById('post-text-content').value.trim()
+            );
+            this.applyImage(image.image_url);
+        } catch (error) {
+            this.showToast(
+                'The draft is ready — the image could not be generated. Add one in step 3.',
+                'warning'
+            );
+        } finally {
+            this.setDraftStage(null);
+        }
+
+        return result;
+    }
+
+    // Fills the editor from a generation result. Assumes openHandoff() already
+    // put the user here; it does not navigate.
     applyRemixResult(result) {
         // Body and tags go to their own homes. full_text has them concatenated,
         // which is what the publish path composes back — using it here would
         // put the tags in the textarea and make them uneditable as tags.
         this.applyBody(result.text || result.full_text || '');
         if (this.hashtagEditor) this.hashtagEditor.set(result.hashtags || []);
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. Clearing it here would silently disable both.
         this.exemplarId = result.exemplar_id || null;
         if (this.hashtagEditor) this.hashtagEditor.setExemplar(this.exemplarId);
+        this.showExemplarAttribution(result.exemplar_url, result.exemplar_author);
+
+        // A remix is a new post, not an edit of a saved one.
+        this.draftId = null;
 
         if (result.image_url) {
             this.applyImage(result.image_url);
         }
 
-        this.switchTab('create');
-        this.draftId = null;
-        // Retained from a remix: the similarity gate needs the source post to
-        // compare against on every refine, and the reference-hashtag path needs
-        // its tags. The API already returned these; nothing kept them.
-        this.exemplarId = null;          // a remix is a new post, not an edit
         this.showEditor(true);
-        // Land on the body section — that is where the draft just arrived.
         this.showSection('body');
+        this.refreshRail();
 
         const band = result.similarity_band || 'unknown';
         const overlap = result.similarity_jaccard !== null
@@ -749,13 +852,15 @@ class App {
             status.textContent = `Finding top posts about "${topic}" and drafting one like them…`;
 
             try {
-                const result = await API.generateFromTopic(topic);
-                status.textContent = (result.notes || []).join(' ');
-                this.applyRemixResult(result);
+                // Slower still — this runs discovery before it drafts — which
+                // is exactly why it gets the same staged treatment.
+                const result = await this.runStagedHandoff(
+                    () => API.generateFromTopic(topic, '', false)
+                );
+                status.textContent = result
+                    ? (result.notes || []).join(' ')
+                    : 'Could not produce a draft.';
                 await this.loadDiscoveryStatus();
-            } catch (error) {
-                status.textContent = error.message || 'Could not produce a draft.';
-                this.showToast(error.message || 'Could not produce a draft.', 'error');
             } finally {
                 this.setButtonLoading(btn, false);
             }
@@ -946,10 +1051,10 @@ class App {
             this.hashtagEditor.set([]);
             this.hashtagEditor.setExemplar(null);
         }
-        // Retained from a remix: the similarity gate needs the source post to
-        // compare against on every refine, and the reference-hashtag path needs
-        // its tags. The API already returned these; nothing kept them.
-        this.exemplarId = null;
+        this.showExemplarAttribution(null, null);
+        // A previous handoff that failed mid-stage would otherwise leave the
+        // textarea hidden behind its skeleton.
+        this.setDraftStage(null);
         document.getElementById('post-creation-form').reset();
         this.clearGeneratedImage();
         document.getElementById('post-text-content').dispatchEvent(new Event('input'));
@@ -977,6 +1082,8 @@ class App {
                 this.exemplarId = null;
                 this.hashtagEditor.setExemplar(null);
             }
+            this.showExemplarAttribution(null, null);
+            this.setDraftStage(null);
 
             if (post.image_url) this.applyImage(post.image_url);
             else this.clearGeneratedImage();
@@ -1053,10 +1160,8 @@ class App {
             await API.deletePost(id);
             if (this.draftId === id) {
                 this.draftId = null;
-        // Retained from a remix: the similarity gate needs the source post to
-        // compare against on every refine, and the reference-hashtag path needs
-        // its tags. The API already returned these; nothing kept them.
-        this.exemplarId = null;
+                this.exemplarId = null;
+                this.showExemplarAttribution(null, null);
                 this.showEditor(false);
             }
             await this.loadDrafts();
@@ -1320,10 +1425,8 @@ class App {
             document.getElementById('datetime-picker-container').classList.add('hidden');
             document.getElementById('btn-submit-text').textContent = 'Review & Publish';
             this.draftId = null;
-        // Retained from a remix: the similarity gate needs the source post to
-        // compare against on every refine, and the reference-hashtag path needs
-        // its tags. The API already returned these; nothing kept them.
-        this.exemplarId = null;
+            this.exemplarId = null;
+            this.showExemplarAttribution(null, null);
             this.showEditor(false);
             this.showSection('ai');
             this.refreshRail();
