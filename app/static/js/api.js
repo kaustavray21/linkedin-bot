@@ -71,6 +71,35 @@ const API = {
     },
 
     // List all posts for current user
+    async listDrafts() {
+        return this.request(`/posts/?user_id=${this.getUserId()}&status=draft`);
+    },
+
+    async getPost(postId) {
+        return this.request(`/posts/${postId}?user_id=${this.getUserId()}`);
+    },
+
+    async updatePost(postId, fields) {
+        return this.request(`/posts/${postId}?user_id=${this.getUserId()}`, {
+            method: 'PUT',
+            body: JSON.stringify(fields)
+        });
+    },
+
+    async generateHashtags({ text = null, exemplarId = null, topic = '', count = null }) {
+        return this.request('/generate/hashtags', {
+            method: 'POST',
+            body: JSON.stringify({ text, exemplar_id: exemplarId, topic, count })
+        });
+    },
+
+    async refinePost(text, instruction, exemplarId = null) {
+        return this.request('/generate/refine', {
+            method: 'POST',
+            body: JSON.stringify({ text, instruction, exemplar_id: exemplarId })
+        });
+    },
+
     async listPosts() {
         return this.request('/posts/');
     },
@@ -130,9 +159,17 @@ const API = {
         return this.request(`/discovery/jobs/${jobId}`);
     },
 
-    async listDiscoveredPosts(keyword = null, sort = 'engagement') {
-        const params = new URLSearchParams({ sort });
+    async bulkDeleteDiscovered(ids) {
+        return this.request('/discovery/posts/bulk-delete', {
+            method: 'POST',
+            body: JSON.stringify({ ids })
+        });
+    },
+
+    async listDiscoveredPosts(keyword = null, sort = 'engagement', includePurged = false) {
+        const params = new URLSearchParams({ sort, limit: '200' });
         if (keyword) params.append('keyword', keyword);
+        if (includePurged) params.append('include_purged', 'true');
         return this.request(`/discovery/posts?${params.toString()}`);
     },
 

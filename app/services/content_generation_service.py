@@ -33,6 +33,7 @@ from app.services.layout_service import (
     extract_skeleton,
     render_template,
 )
+from app.services.hashtag_service import strip_trailing_hashtag_block
 from app.services.similarity_service import SimilarityReport, check_similarity
 from app.services.style_service import extract_style_profile
 
@@ -230,3 +231,79 @@ async def generate_with_layout(
         f"{settings.similarity_max_retries + 1} attempts. "
         f"Last result: {last_report.reason if last_report else 'unknown'}"
     )
+
+
+REFINE_PROMPT = """Rewrite this LinkedIn post according to one instruction.
+
+## The post
+
+\"\"\"{current}\"\"\"
+
+## The instruction
+
+{instruction}
+
+## Rules
+
+- Apply the instruction. Change nothing it does not ask you to change.
+- Keep the same voice, subject and point of view. This is an edit, not a new post.
+- Keep roughly {blocks} paragraphs.
+- Do not add hashtags.
+- Return only the rewritten post. No preamble, no explanation, no quotes."""
+
+
+async def refine_post(
+    current_text: str,
+    instruction: str,
+    exemplar: str | None = None,
+    style=None,
+    ai_service: AIService | None = None,
+) -> tuple[str, SimilarityReport | None]:
+    """Rewrite an existing draft according to one instruction.
+
+    The skeleton comes from the *current text*, not the exemplar, so "make the
+    opening punchier" changes wording and leaves your shape alone. Shape is
+    changed by the paragraph control, not by prose instructions.
+
+    The similarity gate re-runs on every refine when an exemplar is known. That
+    is not belt-and-braces: each rewrite nudges wording, and across several
+    refines a draft can drift back toward the source while still carrying a
+    'green' badge earned by the first generation. When no exemplar is known the
+    report is None, and the caller must say so rather than imply a pass.
+    """
+    current_text = (current_text or "").strip()
+    if not current_text:
+        raise ValueError("There is no post to refine yet.")
+    if not (instruction or "").strip():
+        raise ValueError("Say what you want changed.")
+
+    skeleton = extract_skeleton(current_text)
+    style = style or extract_style_profile([current_text])
+    ai = ai_service or AIService(provider="gemini")
+
+    prompt = REFINE_PROMPT.format(
+        current=current_text,
+        instruction=instruction.strip(),
+        blocks=max(1, len(skeleton.content_blocks)),
+    )
+
+    raw = await ai.generate_with_gemini(prompt)
+    if is_template_fallback(raw):
+        raise ValueError(
+            "Rewriting is unavailable — the AI service returned placeholder content. "
+            "Check GEMINI_API_KEY and model availability."
+        )
+
+    shaped = enforce_layout(raw, skeleton)
+    # Models like to sign off with tags. With hashtags edited separately, an
+    # unstripped block would duplicate them on publish.
+    shaped = strip_trailing_hashtag_block(shaped)
+
+    report = check_similarity(shaped, exemplar) if exemplar else None
+    if report is not None and not report.passed:
+        raise ValueError(
+            f"That rewrite drifted too close to the source post ({report.reason}). "
+            "Try a different instruction."
+        )
+
+    return shaped, report

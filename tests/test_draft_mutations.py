@@ -180,3 +180,26 @@ async def test_round_trip_over_the_api(async_client, user):
     )
     assert cleared.json()["image_url"] is None
     assert cleared.json()["image_source"] is None
+
+
+# ------------------------------------------------- library vs History split --
+
+
+@pytest.mark.asyncio
+async def test_status_filter_separates_drafts_from_history(async_client, service, user):
+    """Drafts live in the Create Post library, published posts in History.
+    Each view asks for the slice it owns instead of fetching everything."""
+    await service.create_draft(user_id=user.id, content="a draft")
+    published = await service.create_draft(user_id=user.id, content="already out")
+    await service.post_repo.update(published, status=POST_STATUS_PUBLISHED)
+
+    drafts = await async_client.get(f"/posts/?user_id={user.id}&status=draft")
+    assert [p["content"] for p in drafts.json()] == ["a draft"]
+
+    everything = await async_client.get(f"/posts/?user_id={user.id}")
+    assert len(everything.json()) == 2
+
+    multi = await async_client.get(
+        f"/posts/?user_id={user.id}&status=published,failed"
+    )
+    assert [p["content"] for p in multi.json()] == ["already out"]

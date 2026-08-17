@@ -7,8 +7,18 @@ class App {
         this.user = null;
         // Discovery paging is client-side: a search returns ~30 rows, which is
         // one small response, so slicing here beats a round trip per page.
+        // Which saved draft the editor is currently bound to. Publishing or
+        // saving without this creates a NEW row every time — an opened draft
+        // would be orphaned by its own publish.
+        this.draftId = null;
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. The API already returned these; nothing kept them.
+        this.exemplarId = null;
         this.discoveredPosts = [];
         this.discoverPage = 0;
+        this.discoverView = 'results';
+        this.selectedPosts = new Set();
         this.DISCOVER_PAGE_SIZE = 7;
         this.init();
     }
@@ -126,6 +136,13 @@ class App {
         } else if (tabName === 'discover') {
             this.loadDiscoveryStatus();
             this.loadDiscoveredPosts();
+        } else if (tabName === 'create') {
+            this.loadDrafts();
+            // Only show the launcher when nothing is open — switching away and
+            // back should not throw away an in-progress post.
+            if (!this.draftId && !document.getElementById('post-text-content').value.trim()) {
+                this.showEditor(false);
+            }
         }
     }
 
@@ -209,7 +226,11 @@ class App {
         const keyword = document.getElementById('discover-topic').value.trim() || null;
 
         try {
-            this.discoveredPosts = await API.listDiscoveredPosts(keyword, sort);
+            // History is everything ever fetched, purged rows included, across
+            // every keyword. Results is what the current search produced.
+            this.discoveredPosts = this.discoverView === 'history'
+                ? await API.listDiscoveredPosts(null, 'recent', true)
+                : await API.listDiscoveredPosts(keyword, sort);
             this.renderDiscoveredPage();
         } catch (error) {
             this.showToast(error.message || 'Could not load discovered posts.', 'error');
@@ -218,11 +239,96 @@ class App {
 
     // Renders one page of the already-fetched set. Kept separate from loading so
     // paging never re-requests — the whole result set is one small response.
+    // Filters that need a value a post does not have EXCLUDE it and say so.
+    // Treating an unread reaction count as zero would push every unreadable
+    // post out of a "min likes" range while looking like a precise filter —
+    // the same trap ranking.py avoids by never conflating None with 0.
+    applyFilters(posts) {
+        const min = parseInt(document.getElementById('filter-min-likes').value, 10);
+        const max = parseInt(document.getElementById('filter-max-likes').value, 10);
+        const days = parseInt(document.getElementById('filter-age').value, 10);
+        const wantsLikes = !Number.isNaN(min) || !Number.isNaN(max);
+        const wantsAge = !Number.isNaN(days);
+
+        let unknownLikes = 0;
+        let unknownAge = 0;
+
+        const kept = posts.filter(post => {
+            if (wantsLikes) {
+                if (post.reactions === null || post.reactions === undefined) {
+                    unknownLikes += 1;
+                    return false;
+                }
+                if (!Number.isNaN(min) && post.reactions < min) return false;
+                if (!Number.isNaN(max) && post.reactions > max) return false;
+            }
+            if (wantsAge) {
+                if (!post.posted_at) {
+                    unknownAge += 1;
+                    return false;
+                }
+                const age = (Date.now() - new Date(`${post.posted_at}Z`).getTime()) / 86400000;
+                if (age > days) return false;
+            }
+            return true;
+        });
+
+        const note = document.getElementById('filter-disclosure');
+        const parts = [];
+        if (unknownLikes) parts.push(`${unknownLikes} with no readable reaction count`);
+        if (unknownAge) parts.push(`${unknownAge} with no known date`);
+        if (parts.length) {
+            note.textContent = `Showing ${kept.length} of ${posts.length}. `
+                + `Excluded: ${parts.join(', ')} — these were not counted as zero.`;
+            note.classList.remove('hidden');
+        } else {
+            note.classList.add('hidden');
+        }
+        return kept;
+    }
+
+    async deleteSelected() {
+        const ids = [...this.selectedPosts];
+        if (!ids.length) return;
+
+        const chosen = this.discoveredPosts.filter(p => this.selectedPosts.has(p.id));
+        const used = chosen.filter(p => p.used_as_reference);
+        const names = chosen.slice(0, 8)
+            .map(p => `• ${p.author_name || 'Unknown'} — ${(p.content_text || p.snippet || '').slice(0, 50)}`)
+            .join('\n');
+
+        const proceed = await this.confirmAction({
+            title: `Delete ${ids.length} discovered post${ids.length === 1 ? '' : 's'}?`,
+            message: `${names}${chosen.length > 8 ? `\n…and ${chosen.length - 8} more` : ''}`
+                + (used.length
+                    ? `\n\n${used.length} of these were used to generate a real post. `
+                      + 'Their text is removed; the layout fingerprint stays so those drafts remain reproducible.'
+                    : ''),
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!proceed) return;
+
+        try {
+            const result = await API.bulkDeleteDiscovered(ids);
+            this.selectedPosts.clear();
+            await this.loadDiscoveredPosts();
+            this.showToast(`${result.purged} post(s) deleted.`, 'success');
+        } catch (error) {
+            this.showToast(error.message || 'Could not delete those posts.', 'error');
+        }
+    }
+
     renderDiscoveredPage() {
         const list = document.getElementById('discovered-list');
         const empty = document.getElementById('discovered-empty');
         const pager = document.getElementById('discovered-pager');
-        const posts = this.discoveredPosts;
+        const posts = this.applyFilters(this.discoveredPosts);
+
+        const bar = document.getElementById('selection-bar');
+        bar.classList.toggle('hidden', this.selectedPosts.size === 0);
+        document.getElementById('selection-count').textContent =
+            `${this.selectedPosts.size} selected`;
         const size = this.DISCOVER_PAGE_SIZE;
 
         list.innerHTML = '';
@@ -252,7 +358,9 @@ class App {
 
     buildDiscoveredCard(post) {
         const card = document.createElement('div');
-        card.className = 'discovered-card';
+        card.className = 'discovered-card'
+            + (this.selectedPosts.has(post.id) ? ' selected' : '')
+            + (post.purged_at ? ' discovered-purged' : '');
 
         const metrics = [];
         if (post.reactions !== null) metrics.push(`${post.reactions} reactions`);
@@ -283,6 +391,8 @@ class App {
         card.innerHTML = `
             <div class="discovered-head">
                 <div>
+                    <input type="checkbox" class="discovered-select" data-select
+                           ${this.selectedPosts.has(post.id) ? 'checked' : ''}>
                     ${authorEl}
                     ${post.author_headline
                         ? `<span class="discovered-headline">${this.escapeHtml(post.author_headline)}</span>`
@@ -305,6 +415,12 @@ class App {
                 </button>
             </div>
         `;
+
+        card.querySelector('[data-select]').addEventListener('change', (e) => {
+            if (e.target.checked) this.selectedPosts.add(post.id);
+            else this.selectedPosts.delete(post.id);
+            this.renderDiscoveredPage();
+        });
 
         card.querySelector('[data-action="remix"]').addEventListener('click', async (e) => {
             const btn = e.currentTarget;
@@ -338,15 +454,25 @@ class App {
 
     // Moves a finished draft into the Create tab, ready for review and publish.
     applyRemixResult(result) {
-        const textarea = document.getElementById('post-text-content');
-        textarea.value = result.full_text || result.text;
-        textarea.dispatchEvent(new Event('input'));   // refresh the char counter
+        // Body and tags go to their own homes. full_text has them concatenated,
+        // which is what the publish path composes back — using it here would
+        // put the tags in the textarea and make them uneditable as tags.
+        this.applyBody(result.text || result.full_text || '');
+        if (this.hashtagEditor) this.hashtagEditor.set(result.hashtags || []);
+        this.exemplarId = result.exemplar_id || null;
+        if (this.hashtagEditor) this.hashtagEditor.setExemplar(this.exemplarId);
 
         if (result.image_url) {
             this.applyImage(result.image_url);
         }
 
         this.switchTab('create');
+        this.draftId = null;
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. The API already returned these; nothing kept them.
+        this.exemplarId = null;          // a remix is a new post, not an edit
+        this.showEditor(true);
         // Land on the body section — that is where the draft just arrived.
         this.showSection('body');
 
@@ -388,8 +514,12 @@ class App {
         // Character counter
         const textarea = document.getElementById('post-text-content');
         const charCounter = document.getElementById('char-counter');
-        textarea.addEventListener('input', () => {
-            const count = textarea.value.length;
+        // Composed, not the raw body. LinkedIn counts hashtags toward the 3000
+        // limit, so a body-only counter reads under the true length right up to
+        // the point where publishing fails — and it would disagree with the
+        // rail, which has always counted the composed post.
+        this.updateCharCounter = () => {
+            const count = this.composeFullText().length;
             charCounter.textContent = `${count} / 3000`;
             if (count > 3000) {
                 charCounter.style.color = 'var(--color-danger)';
@@ -397,7 +527,8 @@ class App {
                 charCounter.style.color = 'var(--text-secondary)';
             }
             this.refreshRail();
-        });
+        };
+        textarea.addEventListener('input', this.updateCharCounter);
 
         // Image source tabs — AI / Upload / URL.
         // These switch where the image comes from; they never gate whether one
@@ -632,13 +763,42 @@ class App {
 
         document.getElementById('discover-sort').addEventListener('change', () => {
             this.discoverPage = 0;
+        this.discoverView = 'results';
+        this.selectedPosts = new Set();
             this.loadDiscoveredPosts();
         });
 
         document.getElementById('btn-refresh-discovered').addEventListener('click', () => {
             this.discoverPage = 0;
+        this.discoverView = 'results';
+        this.selectedPosts = new Set();
             this.loadDiscoveredPosts();
         });
+
+        document.querySelectorAll('.disc-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.disc-tab')
+                    .forEach(t => t.classList.toggle('active', t === tab));
+                this.discoverView = tab.dataset.view;
+                this.discoverPage = 0;
+                this.selectedPosts.clear();
+                this.loadDiscoveredPosts();
+            });
+        });
+
+        ['filter-min-likes', 'filter-max-likes', 'filter-age'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => {
+                this.discoverPage = 0;
+                this.renderDiscoveredPage();
+            });
+        });
+
+        document.getElementById('btn-select-none').addEventListener('click', () => {
+            this.selectedPosts.clear();
+            this.renderDiscoveredPage();
+        });
+        document.getElementById('btn-delete-selected')
+            .addEventListener('click', () => this.deleteSelected());
 
         document.getElementById('discovered-pager').addEventListener('click', (e) => {
             const btn = e.target.closest('[data-page]');
@@ -660,13 +820,332 @@ class App {
         if (workspace) {
             workspace.addEventListener('request-publish', () => this.handlePostSubmit());
         }
+        const library = document.querySelector('draft-library');
+        if (library) {
+            library.addEventListener('draft-new', () => this.startNewPost());
+            library.addEventListener('draft-open', (e) => this.openDraft(e.detail.id));
+            library.addEventListener('draft-delete', (e) => this.deleteDraft(e.detail.id));
+            library.addEventListener('library-collapse', () => this.toggleLibrary(false));
+        }
+        document.getElementById('btn-show-library')
+            .addEventListener('click', () => this.toggleLibrary(true));
+        document.getElementById('btn-launcher-new')
+            .addEventListener('click', () => this.startNewPost());
+        document.getElementById('btn-save-draft')
+            .addEventListener('click', () => this.saveDraft({ explicit: true }));
+
+        const tagEditor = this.hashtagEditor;
+        if (tagEditor) {
+            tagEditor.addEventListener('hashtags-change', () => this.updateCharCounter());
+            tagEditor.addEventListener('hashtags-generate', (e) =>
+                this.generateHashtags(e.detail.source, e.detail.button));
+        }
+
+        const refine = document.querySelector('refine-box');
+        if (refine) {
+            refine.addEventListener('refine-run', (e) =>
+                this.runRefine(e.detail.instruction, e.detail.button));
+            refine.addEventListener('refine-undo', (e) => this.applyBody(e.detail.text));
+        }
+
+        // Class toggle, never inline styles — the <=1024px media query hides the
+        // sidebar entirely, and an inline style would override it on a phone.
+        const sidebarToggle = document.getElementById('btn-toggle-sidebar');
+        sidebarToggle.addEventListener('click', () => this.toggleSidebar());
+        if (localStorage.getItem('sidebar_collapsed') === '1') this.toggleSidebar(true);
+
         this.refreshRail();
+    }
+
+    // ------------------------------------------------------------- DRAFTS --
+
+    toggleSidebar(force = null) {
+        const layout = document.querySelector('.app-layout');
+        const collapsed = force !== null ? force : !layout.classList.contains('sidebar-collapsed');
+        layout.classList.toggle('sidebar-collapsed', collapsed);
+        localStorage.setItem('sidebar_collapsed', collapsed ? '1' : '0');
+        const icon = document.querySelector('#btn-toggle-sidebar i');
+        if (icon) icon.className = collapsed ? 'fa-solid fa-angles-right' : 'fa-solid fa-angles-left';
+    }
+
+    toggleLibrary(show) {
+        document.querySelector('draft-library').classList.toggle('hidden', !show);
+        document.getElementById('btn-show-library').classList.toggle('hidden', show);
+        document.querySelector('.create-workspace')
+            .classList.toggle('library-hidden', !show);
+    }
+
+    async loadDrafts() {
+        try {
+            this.drafts = await API.listDrafts();
+        } catch (error) {
+            this.drafts = [];
+        }
+        const library = document.querySelector('draft-library');
+        if (library && library.render) {
+            library.render(this.drafts);
+            library.setActive(this.draftId);
+        }
+        this.renderLauncherDrafts();
+    }
+
+    renderLauncherDrafts() {
+        const box = document.getElementById('launcher-drafts');
+        if (!box) return;
+        const recent = (this.drafts || []).slice(0, 4);
+        if (!recent.length) {
+            box.innerHTML = '';
+            return;
+        }
+        box.innerHTML = '<span class="launcher-label">Or open a draft</span>'
+            + recent.map(post => {
+                const first = (post.content || '').split('\n').map(l => l.trim()).find(Boolean)
+                    || 'Untitled draft';
+                const title = first.length > 46 ? `${first.slice(0, 46)}…` : first;
+                return `<button type="button" class="launcher-draft" data-draft="${post.id}">`
+                     + `${this.escapeHtml(title)}</button>`;
+            }).join('');
+
+        box.querySelectorAll('[data-draft]').forEach(btn => {
+            btn.addEventListener('click', () => this.openDraft(Number(btn.dataset.draft)));
+        });
+    }
+
+    showEditor(on) {
+        document.querySelector('.create-main').classList.toggle('hidden', !on);
+        document.getElementById('create-launcher').classList.toggle('hidden', on);
+        document.querySelector('create-rail').classList.toggle('hidden', !on);
+    }
+
+    startNewPost() {
+        this.draftId = null;
+        this.exemplarId = null;
+        if (this.hashtagEditor) {
+            this.hashtagEditor.set([]);
+            this.hashtagEditor.setExemplar(null);
+        }
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. The API already returned these; nothing kept them.
+        this.exemplarId = null;
+        document.getElementById('post-creation-form').reset();
+        this.clearGeneratedImage();
+        document.getElementById('post-text-content').dispatchEvent(new Event('input'));
+        document.getElementById('variations-selector-container').classList.add('hidden');
+        document.getElementById('datetime-picker-container').classList.add('hidden');
+        this.showEditor(true);
+        this.showSection('ai');
+        this.refreshRail();
+        const library = document.querySelector('draft-library');
+        if (library && library.setActive) library.setActive(null);
+    }
+
+    async openDraft(id) {
+        try {
+            const post = await API.getPost(id);
+            this.draftId = post.id;
+
+            const { body, tags } = this.decomposeFullText(post.content || '');
+            this.applyBody(body);
+            if (this.hashtagEditor) {
+                this.hashtagEditor.set(tags);
+                // A stored draft carries no exemplar yet (that arrives with
+                // draft_lineage), so the reference path degrades visibly rather
+                // than silently doing nothing.
+                this.exemplarId = null;
+                this.hashtagEditor.setExemplar(null);
+            }
+
+            if (post.image_url) this.applyImage(post.image_url);
+            else this.clearGeneratedImage();
+
+            const wantsSchedule = Boolean(post.scheduled_time);
+            const radio = document.querySelector(
+                `input[name="post-schedule-type"][value="${wantsSchedule ? 'later' : 'now'}"]`
+            );
+            radio.checked = true;
+            radio.dispatchEvent(new Event('change'));
+            if (wantsSchedule) {
+                // datetime-local wants local wall time with no zone suffix.
+                const when = new Date(post.scheduled_time.endsWith('Z')
+                    ? post.scheduled_time : `${post.scheduled_time}Z`);
+                const pad = (n) => String(n).padStart(2, '0');
+                document.getElementById('post-scheduled-time').value =
+                    `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`
+                    + `T${pad(when.getHours())}:${pad(when.getMinutes())}`;
+            }
+
+            this.showEditor(true);
+            this.showSection('body');
+            this.refreshRail();
+            const library = document.querySelector('draft-library');
+            if (library && library.setActive) library.setActive(post.id);
+        } catch (error) {
+            this.showToast(error.message || 'Could not open that draft.', 'error');
+        }
+    }
+
+    async saveDraft({ explicit = false } = {}) {
+        const post = this.getPostState();
+        if (!post.content.trim()) {
+            if (explicit) this.showToast('Nothing to save yet.', 'warning');
+            return null;
+        }
+
+        const btn = document.getElementById('btn-save-draft');
+        if (explicit) this.setButtonLoading(btn, true);
+        try {
+            const fields = {
+                content: post.content.trim(),
+                image_url: post.imageUrl || null,
+                scheduled_time: post.scheduledUtc,
+            };
+            // One request carrying the whole post, never a field at a time:
+            // a draft is either fully the new version or fully the old one.
+            const saved = this.draftId
+                ? await API.updatePost(this.draftId, fields)
+                : await API.createPost(fields.content, fields.image_url, fields.scheduled_time);
+
+            this.draftId = saved.id;
+            await this.loadDrafts();
+            if (explicit) this.showToast('Draft saved.', 'success');
+            return saved;
+        } catch (error) {
+            this.showToast(error.message || 'Could not save the draft.', 'error');
+            return null;
+        } finally {
+            if (explicit) this.setButtonLoading(btn, false);
+        }
+    }
+
+    async deleteDraft(id) {
+        const proceed = await this.confirmAction({
+            title: 'Delete this draft?',
+            message: 'This removes the saved draft. It cannot be undone.',
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!proceed) return;
+
+        try {
+            await API.deletePost(id);
+            if (this.draftId === id) {
+                this.draftId = null;
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. The API already returned these; nothing kept them.
+        this.exemplarId = null;
+                this.showEditor(false);
+            }
+            await this.loadDrafts();
+            this.showToast('Draft deleted.', 'success');
+        } catch (error) {
+            this.showToast(error.message || 'Could not delete that draft.', 'error');
+        }
+    }
+
+    applyBody(text) {
+        const textarea = document.getElementById('post-text-content');
+        textarea.value = text;
+        textarea.dispatchEvent(new Event('input'));
+    }
+
+    async generateHashtags(source, button) {
+        const post = this.getPostState();
+        if (source === 'post' && !post.content.trim()) {
+            this.showToast('Write the post first — the tags come from it.', 'warning');
+            this.showSection('body');
+            return;
+        }
+
+        this.setButtonLoading(button, true);
+        try {
+            const result = await API.generateHashtags({
+                text: source === 'post' ? this.composeFullText() : null,
+                exemplarId: source === 'reference' ? this.exemplarId : null,
+                topic: post.topic,
+                // Omitted for the reference path on purpose: remix_hashtags
+                // matches the exemplar's own count when count is null.
+                count: source === 'post' ? 5 : null,
+            });
+            this.hashtagEditor.set(result.hashtags);
+            this.showToast(`${result.hashtags.length} hashtags added.`, 'success');
+        } catch (error) {
+            this.showToast(error.message || 'Could not generate hashtags.', 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
+    async runRefine(instruction, button) {
+        const body = document.getElementById('post-text-content').value.trim();
+        if (!body) {
+            this.showToast('Write or generate the post first.', 'warning');
+            return;
+        }
+
+        const refine = document.querySelector('refine-box');
+        this.setButtonLoading(button, true);
+        try {
+            const result = await API.refinePost(body, instruction, this.exemplarId);
+            refine.push(body);              // so Undo has somewhere to go back to
+            this.applyBody(result.text);
+            refine.remember(instruction);
+            refine.showOriginality({
+                checked: result.similarity_checked,
+                band: result.similarity_band,
+                jaccard: result.similarity_jaccard,
+            });
+            this.showToast('Rewritten.', 'success');
+        } catch (error) {
+            this.showToast(error.message || 'Could not rewrite that.', 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
+    // ---------------------------------------------------- BODY + HASHTAGS --
+
+    get hashtagEditor() {
+        return document.getElementById('hashtag-editor');
+    }
+
+    get tags() {
+        const el = this.hashtagEditor;
+        return el && el.tags ? el.tags : [];
+    }
+
+    // Mirrors RemixResult.full_text on the server: body, blank line, tags.
+    // Everything downstream — preview, publish, char count, draft save — uses
+    // this, so what you see is what gets posted.
+    composeFullText() {
+        const body = document.getElementById('post-text-content').value.trimEnd();
+        const tags = this.tags;
+        return tags.length ? `${body}\n\n${tags.join(' ')}` : body;
+    }
+
+    // Splitting a stored post back apart on open. strip_trailing_hashtag_block's
+    // rule: only a block that is ENTIRELY tags counts — a line ending in one
+    // tag is still prose.
+    decomposeFullText(text) {
+        const blocks = (text || '').replace(/\s+$/, '').split('\n\n');
+        const tags = [];
+        while (blocks.length) {
+            const words = blocks[blocks.length - 1].split(/\s+/).filter(Boolean);
+            if (words.length && words.every(w => w.startsWith('#'))) {
+                tags.unshift(...blocks.pop().split(/\s+/).filter(Boolean));
+            } else break;
+        }
+        return { body: blocks.join('\n\n').replace(/\s+$/, ''), tags };
     }
 
     // Everything the rail shows and the publish preview reads, in one place —
     // so the two can never describe the post differently.
     getPostState() {
-        const content = document.getElementById('post-text-content').value;
+        // Composed, not the raw textarea: LinkedIn counts hashtags toward the
+        // 3000 limit, so counting the body alone would understate it right up
+        // to the point of failure.
+        const content = this.composeFullText();
         const checked = document.querySelector('input[name="post-schedule-type"]:checked');
         const scheduleType = checked ? checked.value : 'now';
         const scheduledLocal = document.getElementById('post-scheduled-time').value;
@@ -692,6 +1171,8 @@ class App {
             content,
             charCount: content.length,
             imageUrl: document.getElementById('generated-image-url').value,
+            hashtags: this.tags,
+            exemplarId: this.exemplarId,
             scheduleType,
             scheduledLocal,
             scheduledUtc,
@@ -785,10 +1266,16 @@ class App {
         submitSpinner.classList.remove('hidden');
 
         try {
-            // Step A: Save Draft (or Scheduled) in local DB
-            const created = await API.createPost(
-                post.content.trim(), post.imageUrl, post.scheduledUtc
-            );
+            // Step A: persist. An open draft is UPDATED, never duplicated —
+            // creating a new row here would publish the copy and leave the
+            // original sitting in the library looking unpublished forever.
+            const created = this.draftId
+                ? await API.updatePost(this.draftId, {
+                      content: post.content.trim(),
+                      image_url: post.imageUrl || null,
+                      scheduled_time: post.scheduledUtc,
+                  })
+                : await API.createPost(post.content.trim(), post.imageUrl, post.scheduledUtc);
 
             // Step B: If publish now, trigger active publishing immediately
             if (post.scheduleType === 'now') {
@@ -810,8 +1297,15 @@ class App {
             document.getElementById('variations-selector-container').classList.add('hidden');
             document.getElementById('datetime-picker-container').classList.add('hidden');
             document.getElementById('btn-submit-text').textContent = 'Review & Publish';
+            this.draftId = null;
+        // Retained from a remix: the similarity gate needs the source post to
+        // compare against on every refine, and the reference-hashtag path needs
+        // its tags. The API already returned these; nothing kept them.
+        this.exemplarId = null;
+            this.showEditor(false);
             this.showSection('ai');
             this.refreshRail();
+            await this.loadDrafts();
 
             // Go to history tab
             this.switchTab('history');
@@ -874,7 +1368,10 @@ class App {
         tbody.innerHTML = '';
         
         try {
-            const posts = await API.listPosts();
+            // Drafts live in the Create Post library now; History is the record
+            // of what actually went out or is queued to.
+            const all = await API.listPosts();
+            const posts = all.filter(p => p.status !== 'draft');
             if (posts.length === 0) {
                 emptyState.classList.remove('hidden');
                 return;

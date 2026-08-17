@@ -161,3 +161,54 @@ async def remix_hashtags(
     # Order carries a signature of its own; shuffle so ours does not mirror theirs.
     random.shuffle(cleaned)
     return cleaned
+
+
+DERIVE_PROMPT = """Read this LinkedIn post and produce {count} hashtags for it.
+
+Post:
+\"\"\"{text}\"\"\"
+
+Rules:
+- Tags must describe what this post is actually about — not generic filler.
+- Match the register a thoughtful practitioner would use, not a marketer.
+- Prefer specific over broad where the post supports it.
+- Return only the hashtags, space separated, on one line. Nothing else."""
+
+
+async def derive_hashtags(
+    text: str,
+    count: int = 5,
+    ai_service: AIService | None = None,
+) -> list[str]:
+    """Tags derived from your own finished post, with no exemplar involved.
+
+    Distinct from remix_hashtags(): that one exists to avoid copying a source's
+    distinctive tags, a rule that only means something when there IS a source.
+    Here there is nothing to avoid — the job is reading the post and naming what
+    it is about. _fallback_remix() is not a substitute either; it only
+    capitalises words from a topic string.
+    """
+    text = (text or "").strip()
+    if not text or count <= 0:
+        return []
+
+    ai = ai_service or AIService(provider="gemini")
+    prompt = DERIVE_PROMPT.format(text=text[:4000], count=count)
+
+    try:
+        raw = await ai.generate_with_gemini(prompt)
+    except Exception:
+        log.exception("Hashtag derivation failed")
+        return _fallback_remix([], text, count)
+
+    # Without this, an unreachable Gemini turns its canned marketing copy into
+    # hashtags — #Excited, #Insights — and they look deliberate.
+    if is_template_fallback(raw):
+        log.warning("Hashtag derivation got the AI fallback template; using words from the post")
+        return _fallback_remix([], text, count)
+
+    seen: list[str] = []
+    for tag in extract_tags(raw):
+        if tag.lower() not in {t.lower() for t in seen}:
+            seen.append(tag)
+    return seen[:count] or _fallback_remix([], text, count)

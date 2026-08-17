@@ -245,6 +245,47 @@ async def list_posts(
     return [_post_to_response(p) for p in posts]
 
 
+class BulkDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+class BulkDeleteResponse(BaseModel):
+    purged: int
+    used_as_reference: int
+
+
+@router.post("/posts/bulk-delete", response_model=BulkDeleteResponse)
+async def bulk_delete(
+    body: BulkDeleteRequest,
+    db: AsyncSession = Depends(get_session),
+) -> BulkDeleteResponse:
+    """Purge several posts at once.
+
+    Purges rather than hard-deletes, same as the single-post route: the layout
+    skeleton stays so any draft already generated from these posts remains
+    reproducible. The count of posts that were used as a reference comes back so
+    the client can say what was actually lost.
+    """
+    if not body.ids:
+        return BulkDeleteResponse(purged=0, used_as_reference=0)
+
+    posts = (
+        await db.execute(
+            select(DiscoveredPost).where(
+                DiscoveredPost.id.in_(body.ids),
+                DiscoveredPost.purged_at.is_(None),
+            )
+        )
+    ).scalars().all()
+
+    used = sum(1 for p in posts if p.used_as_reference)
+    for post in posts:
+        await purge_post(db, post)
+    await db.flush()
+
+    return BulkDeleteResponse(purged=len(posts), used_as_reference=used)
+
+
 @router.post("/posts/{post_id}/reviewed", response_model=DiscoveredPostResponse)
 async def mark_reviewed(
     post_id: int, db: AsyncSession = Depends(get_session)

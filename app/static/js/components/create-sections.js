@@ -12,7 +12,7 @@
 
 import { Component } from './base.js';
 
-export const SECTION_ORDER = ['ai', 'body', 'image', 'schedule'];
+export const SECTION_ORDER = ['ai', 'body', 'image', 'hashtags', 'schedule'];
 
 export class CreateSections extends Component {
     mounted() {

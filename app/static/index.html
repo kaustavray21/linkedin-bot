@@ -58,6 +58,10 @@
                         <div class="logo-icon-sm"><i class="fa-solid fa-robot"></i></div>
                         <h2>LinkedIn<span>Bot</span></h2>
                     </div>
+                    <button type="button" id="btn-toggle-sidebar" class="btn-icon"
+                            title="Hide menu" aria-label="Hide menu">
+                        <i class="fa-solid fa-angles-left"></i>
+                    </button>
                 </div>
 
                 <div class="user-profile-widget">
@@ -217,6 +221,35 @@
                                     </button>
                                 </div>
                             </div>
+                            <div class="discover-toolbar">
+                                <div class="discover-tabs">
+                                    <button type="button" class="disc-tab active" data-view="results">Results</button>
+                                    <button type="button" class="disc-tab" data-view="history">History</button>
+                                </div>
+                                <div class="discover-filters">
+                                    <input type="number" id="filter-min-likes" min="0" placeholder="Min likes">
+                                    <input type="number" id="filter-max-likes" min="0" placeholder="Max likes">
+                                    <select id="filter-age" class="form-control">
+                                        <option value="">Any age</option>
+                                        <option value="7">Last week</option>
+                                        <option value="30">Last month</option>
+                                        <option value="365">Last year</option>
+                                        <option value="1095">Last 3 years</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <p id="filter-disclosure" class="filter-disclosure hidden"></p>
+
+                            <div id="selection-bar" class="selection-bar hidden">
+                                <span id="selection-count"></span>
+                                <div>
+                                    <button type="button" id="btn-select-none" class="btn btn-secondary btn-sm">Clear</button>
+                                    <button type="button" id="btn-delete-selected" class="btn btn-secondary btn-sm">
+                                        <i class="fa-solid fa-trash"></i> Delete selected
+                                    </button>
+                                </div>
+                            </div>
+
                             <div class="card-body">
                                 <div id="discovered-skeleton" class="hidden discovered-skeleton">
                                     <div class="skel-card"></div>
@@ -245,7 +278,29 @@
                     <!-- C. CREATE POST VIEW -->
                     <section id="view-create" class="tab-view">
                         <create-sections class="create-workspace">
-                          <div class="create-main">
+                          <draft-library class="draft-library"></draft-library>
+
+                          <button type="button" id="btn-show-library" class="library-peek hidden"
+                                  title="Show drafts">
+                              <i class="fa-solid fa-angles-right"></i>
+                          </button>
+
+                          <!-- Shown until a post is open. Create Post should not
+                               drop you into a blank editor with no way back to
+                               what you were working on. -->
+                          <div id="create-launcher" class="create-launcher">
+                              <div class="launcher-card">
+                                  <i class="fa-solid fa-feather-pointed"></i>
+                                  <h3>Start a post</h3>
+                                  <p>Write from scratch, or pick up a saved draft.</p>
+                                  <button type="button" id="btn-launcher-new" class="btn btn-primary">
+                                      <i class="fa-solid fa-plus"></i> New post
+                                  </button>
+                                  <div id="launcher-drafts" class="launcher-drafts"></div>
+                              </div>
+                          </div>
+
+                          <div class="create-main hidden">
                             <div class="card">
                                 <!-- novalidate is load-bearing: a hidden section's `required`
                                      field would otherwise block submit with no visible error. -->
@@ -338,6 +393,8 @@
                                              </div>
                                          </div>
 
+                                         <refine-box class="refine-host"></refine-box>
+
                                          <!-- Variations Selector Container -->
                                          <div id="variations-selector-container" class="hidden" style="margin-top: 12px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px;">
                                              <span style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 8px;">Select Draft Variation:</span>
@@ -424,8 +481,15 @@
                                     </div>
  
                                     <!-- Scheduling -->
+                                    <div class="form-section" data-section="hashtags">
+                                        <label class="section-label">4. Hashtags
+                                            <span style="font-weight: 400; color: var(--text-muted); font-size: 0.8rem;">(optional)</span>
+                                        </label>
+                                        <hashtag-editor id="hashtag-editor"></hashtag-editor>
+                                    </div>
+
                                     <div class="form-section" data-section="schedule">
-                                        <label class="section-label">4. Publish or Schedule</label>
+                                        <label class="section-label">5. Publish or Schedule</label>
                                         <div class="schedule-toggle-container">
                                             <div class="schedule-toggle-options">
                                                 <label class="toggle-option active">
@@ -454,6 +518,10 @@
                             <div class="section-nav">
                                 <button type="button" class="btn btn-secondary" data-nav="prev">
                                     <i class="fa-solid fa-arrow-left"></i> Back
+                                </button>
+                                <button type="button" id="btn-save-draft" class="btn btn-secondary">
+                                    <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                    <span class="btn-text"><i class="fa-solid fa-floppy-disk"></i> Save draft</span>
                                 </button>
                                 <button type="button" class="btn btn-secondary" data-nav="next">
                                     Next <i class="fa-solid fa-arrow-right"></i>

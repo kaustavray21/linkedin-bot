@@ -52,10 +52,22 @@ async def create_post(
 @router.get("/", response_model=list[PostResponse])
 async def list_posts(
     user_id: int = Query(...),
+    status: str | None = Query(None, description="Comma-separated statuses to include"),
     db: AsyncSession = Depends(get_session),
 ):
+    """List a user's posts, optionally narrowed by status.
+
+    Drafts and published posts now live in different places in the UI — the
+    library and History respectively — so each asks for the slice it owns
+    rather than fetching everything and filtering twice on the client.
+    """
     service = PostService(db)
     posts = await service.get_user_posts(user_id)
+
+    if status:
+        wanted = {s.strip() for s in status.split(",") if s.strip()}
+        posts = [p for p in posts if p.status in wanted]
+
     return [_post_to_response(p) for p in posts]
 
 

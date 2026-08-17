@@ -63,6 +63,115 @@ class StyledImageGenerateRequest(BaseModel):
     post_text: str
 
 
+class HashtagRequest(BaseModel):
+    text: str | None = None
+    exemplar_id: int | None = None
+    topic: str | None = ""
+    count: int | None = None
+
+
+class HashtagResponse(BaseModel):
+    hashtags: list[str]
+    source: str          # "reference" | "post"
+
+
+class RefineRequest(BaseModel):
+    text: str
+    instruction: str
+    exemplar_id: int | None = None
+
+
+class RefineResponse(BaseModel):
+    text: str
+    similarity_jaccard: float | None = None
+    similarity_band: str | None = None
+    similarity_checked: bool = False
+
+
+@router.post("/hashtags", response_model=HashtagResponse)
+async def generate_hashtags_endpoint(
+    body: HashtagRequest,
+    db: AsyncSession = Depends(get_session),
+):
+    """Two different jobs behind one route.
+
+    With an exemplar we remix its tags — a rule about not copying, which only
+    means something when there is a source. Without one we read the post and
+    name what it is about. They are not the same function.
+    """
+    from sqlalchemy import select
+
+    from app.database.models import DiscoveredPost
+    from app.services.hashtag_service import derive_hashtags, extract_tags, remix_hashtags
+
+    try:
+        if body.exemplar_id is not None:
+            exemplar = (
+                await db.execute(
+                    select(DiscoveredPost).where(DiscoveredPost.id == body.exemplar_id)
+                )
+            ).scalar_one_or_none()
+            if exemplar is None:
+                raise HTTPException(status_code=404, detail="Discovered post not found")
+
+            source_tags = exemplar.hashtags or extract_tags(exemplar.content_text or "")
+            if not source_tags:
+                raise HTTPException(
+                    status_code=422,
+                    detail="That post has no hashtags to work from — try 'From my post'.",
+                )
+            tags = await remix_hashtags(
+                source_tags, body.topic or "", count=body.count
+            )
+            return HashtagResponse(hashtags=tags, source="reference")
+
+        tags = await derive_hashtags(body.text or "", count=body.count or 5)
+        return HashtagResponse(hashtags=tags, source="post")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/refine", response_model=RefineResponse)
+async def refine_endpoint(
+    body: RefineRequest,
+    db: AsyncSession = Depends(get_session),
+):
+    """Rewrite a draft to one instruction, re-checking originality every time."""
+    from sqlalchemy import select
+
+    from app.database.models import DiscoveredPost
+    from app.services.content_generation_service import refine_post
+
+    exemplar_text: str | None = None
+    if body.exemplar_id is not None:
+        exemplar = (
+            await db.execute(
+                select(DiscoveredPost).where(DiscoveredPost.id == body.exemplar_id)
+            )
+        ).scalar_one_or_none()
+        exemplar_text = exemplar.content_text if exemplar else None
+
+    try:
+        text, report = await refine_post(
+            current_text=body.text,
+            instruction=body.instruction,
+            exemplar=exemplar_text,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return RefineResponse(
+        text=text,
+        similarity_jaccard=report.jaccard if report else None,
+        similarity_band=report.band if report else None,
+        # False means "no source post to compare against" — the UI must say that
+        # rather than show a green badge that stands for nothing.
+        similarity_checked=report is not None,
+    )
+
+
 class RemixRequest(BaseModel):
     topic: str
     exemplar_id: int

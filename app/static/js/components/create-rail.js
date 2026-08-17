@@ -20,7 +20,8 @@ const SECTIONS = [
     { key: 'ai', step: 1, title: 'AI Assistant' },
     { key: 'body', step: 2, title: 'Post Body' },
     { key: 'image', step: 3, title: 'Image' },
-    { key: 'schedule', step: 4, title: 'Publish' },
+    { key: 'hashtags', step: 4, title: 'Hashtags' },
+    { key: 'schedule', step: 5, title: 'Publish' },
 ];
 
 export class CreateRail extends Component {
@@ -73,6 +74,7 @@ export class CreateRail extends Component {
         this.write('ai', this.statusAi(post));
         this.write('body', this.statusBody(post));
         this.write('image', this.statusImage(post));
+        this.write('hashtags', this.statusHashtags(post));
         this.write('schedule', this.statusSchedule(post));
     }
 
@@ -108,6 +110,12 @@ export class CreateRail extends Component {
             markup: html`<img class="rail-thumb" src="${post.imageUrl}" alt=""> set`,
             tone: 'ok',
         };
+    }
+
+    statusHashtags(post) {
+        const n = (post.hashtags || []).length;
+        if (!n) return { markup: html`none`, tone: 'muted' };
+        return { markup: html`${n} tag${n === 1 ? '' : 's'}`, tone: 'ok' };
     }
 
     statusSchedule(post) {

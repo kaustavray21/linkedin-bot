@@ -146,3 +146,43 @@ async def test_author_profile_url_reaches_the_client(async_client, db_session):
     assert response.json()[0]["author_profile_url"] == (
         "https://www.linkedin.com/in/a-person"
     )
+
+
+# ---------------------------------------------------------- bulk deletion --
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_purges_and_reports_what_was_in_use(async_client, db_session):
+    """Purge, not hard-delete: a draft already generated from one of these must
+    stay reproducible, so the layout skeleton survives and only the third-party
+    wording goes."""
+    for i, used in enumerate([True, False, False]):
+        db_session.add(
+            DiscoveredPost(
+                keyword="topic",
+                source="ddg",
+                post_url=f"https://www.linkedin.com/posts/bulk{i}",
+                content_text="body text",
+                layout_skeleton={"blocks": []},
+                metrics_source="inferred",
+                used_as_reference=used,
+            )
+        )
+    await db_session.flush()
+
+    ids = [p.id for p in (await db_session.execute(select(DiscoveredPost))).scalars().all()]
+    response = await async_client.post("/discovery/posts/bulk-delete", json={"ids": ids})
+
+    assert response.status_code == 200
+    assert response.json() == {"purged": 3, "used_as_reference": 1}
+
+    rows = (await db_session.execute(select(DiscoveredPost))).scalars().all()
+    assert all(r.purged_at is not None for r in rows)
+    assert all(r.content_text is None for r in rows), "wording should be gone"
+    assert all(r.layout_skeleton is not None for r in rows), "skeleton must survive"
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_is_a_no_op_on_an_empty_selection(async_client):
+    response = await async_client.post("/discovery/posts/bulk-delete", json={"ids": []})
+    assert response.json() == {"purged": 0, "used_as_reference": 0}
