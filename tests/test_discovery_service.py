@@ -36,7 +36,7 @@ class FakeProvider:
     def __init__(self, urls):
         self.urls = urls
 
-    async def search(self, keyword, limit):
+    async def search(self, keyword, limit, **_options):
         return SearchOutcome(
             provider=self.name,
             candidates=[
@@ -161,7 +161,7 @@ async def test_search_failure_is_reported_as_failed(db_session, monkeypatch):
     class DeadProvider:
         name = "dead"
 
-        async def search(self, keyword, limit):
+        async def search(self, keyword, limit, **_options):
             return SearchOutcome(provider=self.name, error="search backend unreachable")
 
     monkeypatch.setattr(

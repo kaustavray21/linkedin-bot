@@ -59,57 +59,8 @@ async def generate_image(body: ImageGenerateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-class StyledPostGenerateRequest(BaseModel):
-    topic: str
-    user_notes: str | None = ""
-    profile_slug: str = "combined"
-    selected_posts: list[str] | None = None
-    num_words: int | None = None
-    num_paragraphs: int | None = None
-    num_variations: int = 1
-    hook_style: str | None = None
-    line_rhythm: str | None = None
-    word_type: str | None = None
-
-
 class StyledImageGenerateRequest(BaseModel):
     post_text: str
-
-
-@router.post("/styled-post", response_model=TextVariationsResponse)
-async def generate_styled_post_endpoint(
-    body: StyledPostGenerateRequest,
-    db: AsyncSession = Depends(get_session)
-):
-    """Generate style-conditioned LinkedIn post text with variations."""
-    try:
-        from app.services.content_generation_service import generate_styled_post
-        import asyncio
-        
-        # Cap variations between 1 and 3 to limit api load
-        num_vars = max(1, min(3, body.num_variations))
-        
-        tasks = []
-        for i in range(num_vars):
-            tasks.append(
-                generate_styled_post(
-                    topic=body.topic,
-                    user_notes=body.user_notes or "",
-                    db=db,
-                    profile_slug=body.profile_slug,
-                    selected_posts=body.selected_posts,
-                    num_words=body.num_words,
-                    num_paragraphs=body.num_paragraphs,
-                    variation_index=i,
-                    hook_style=body.hook_style,
-                    line_rhythm=body.line_rhythm,
-                    word_type=body.word_type
-                )
-            )
-        variations = await asyncio.gather(*tasks)
-        return TextVariationsResponse(variations=list(variations))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 class RemixRequest(BaseModel):

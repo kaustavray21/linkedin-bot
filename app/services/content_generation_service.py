@@ -24,12 +24,8 @@ from __future__ import annotations
 
 import statistics
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.database.models import ReferencePost, ReferenceProfile
 from app.services.ai_service import AIService, is_template_fallback
 from app.services.layout_service import (
     LayoutSkeleton,
@@ -102,55 +98,6 @@ def select_representative(posts: list[str]) -> str:
     return min(skeletons, key=distance)[0]
 
 
-async def _load_posts(
-    db: AsyncSession,
-    profile_slug: str,
-    selected_posts: list[str] | None,
-) -> list[str]:
-    """Resolve the reference set the caller asked for."""
-    if selected_posts:
-        posts: list[str] = []
-        for post_ref in selected_posts:
-            parts = post_ref.split("/")
-            if len(parts) != 2:
-                continue
-            p_id = (
-                await db.execute(
-                    select(ReferenceProfile.id).where(ReferenceProfile.slug == parts[0])
-                )
-            ).scalar_one_or_none()
-            if not p_id:
-                continue
-            text = (
-                await db.execute(
-                    select(ReferencePost.full_text).where(
-                        ReferencePost.profile_id == p_id,
-                        ReferencePost.filename == parts[1],
-                    )
-                )
-            ).scalar_one_or_none()
-            if text:
-                posts.append(text)
-        if not posts:
-            raise ValueError("No valid selected posts found in database.")
-        return posts
-
-    if profile_slug == "combined":
-        result = await db.execute(select(ReferencePost.full_text))
-        return list(result.scalars().all())
-
-    profile = (
-        await db.execute(
-            select(ReferenceProfile).where(ReferenceProfile.slug == profile_slug)
-        )
-    ).scalar_one_or_none()
-    if not profile:
-        raise ValueError(f"Reference profile '{profile_slug}' not found.")
-
-    result = await db.execute(
-        select(ReferencePost.full_text).where(ReferencePost.profile_id == profile.id)
-    )
-    return list(result.scalars().all())
 
 
 def build_prompt(
@@ -283,42 +230,3 @@ async def generate_with_layout(
         f"{settings.similarity_max_retries + 1} attempts. "
         f"Last result: {last_report.reason if last_report else 'unknown'}"
     )
-
-
-async def generate_styled_post(
-    topic: str,
-    user_notes: str,
-    db: AsyncSession,
-    profile_slug: str = "combined",
-    selected_posts: list[str] | None = None,
-    num_words: int | None = None,
-    num_paragraphs: int | None = None,
-    variation_index: int = 0,
-    hook_style: str | None = None,
-    line_rhythm: str | None = None,
-    word_type: str | None = None,
-) -> str:
-    """Backwards-compatible entry point behind POST /generate/styled-post.
-
-    num_words / num_paragraphs / line_rhythm are accepted for API compatibility
-    but no longer steer the output: the exemplar's own skeleton now decides
-    length and paragraphing, which is the entire point of the rewrite. Callers
-    wanting a different shape should select a different exemplar.
-    """
-    posts = await _load_posts(db, profile_slug, selected_posts)
-    if not posts:
-        raise ValueError("No reference posts found.")
-
-    exemplar = select_representative(posts)
-    style = extract_style_profile(posts)
-
-    text, _report = await generate_with_layout(
-        topic=topic,
-        exemplar=exemplar,
-        user_notes=user_notes,
-        style=style,
-        hook_style=hook_style,
-        word_type=word_type,
-        variation_index=variation_index,
-    )
-    return text

@@ -5,6 +5,11 @@ class App {
     constructor() {
         this.currentTab = 'dashboard';
         this.user = null;
+        // Discovery paging is client-side: a search returns ~30 rows, which is
+        // one small response, so slicing here beats a round trip per page.
+        this.discoveredPosts = [];
+        this.discoverPage = 0;
+        this.DISCOVER_PAGE_SIZE = 7;
         this.init();
     }
 
@@ -118,8 +123,6 @@ class App {
             this.loadDashboardData();
         } else if (tabName === 'history') {
             this.loadHistory();
-        } else if (tabName === 'create') {
-            this.initCreatorProfiles();
         } else if (tabName === 'discover') {
             this.loadDiscoveryStatus();
             this.loadDiscoveredPosts();
@@ -139,7 +142,8 @@ class App {
                 .filter(([, c]) => c.open)
                 .map(([name]) => name);
 
-            let text = `${status.remaining_today} of ${status.daily_cap} reads left today. `
+            let text = `${status.remaining_today} of ${status.daily_cap} reads left today `
+                     + `· ${status.requests_per_second}/s across ${status.concurrency} workers. `
                      + 'Posts are read without signing in — your LinkedIn account is never used.';
             if (openCircuits.length) {
                 // Surfaced rather than hidden: silently returning nothing would
@@ -153,11 +157,12 @@ class App {
     }
 
     // Follow a background discovery job, refreshing the list as posts land.
-    // Reads are paced ~30s apart on purpose, so a 10-post run takes >5 minutes;
-    // showing results incrementally is what keeps that bearable.
+    // Fetching is parallel now, so a run is seconds rather than minutes — but
+    // posts still land a wave at a time, and showing them as they arrive is
+    // what makes the run legible rather than a frozen spinner.
     async followDiscoveryJob(jobId, topic) {
         const status = document.getElementById('discovery-status');
-        const deadlineMs = Date.now() + 15 * 60 * 1000;
+        const deadlineMs = Date.now() + 3 * 60 * 1000;
 
         while (Date.now() < deadlineMs) {
             let job;
@@ -173,7 +178,7 @@ class App {
             status.textContent =
                 `${job.status} · found ${job.found_count}, read ${job.fetched_count}`
                 + (job.parse_failures ? `, ${job.parse_failures} unreadable` : '')
-                + (done ? '' : ' — reads are spaced out to stay within safe limits…')
+                + (done ? '' : ' — fetching…')
                 + (job.error ? ` — ${job.error}` : '');
 
             await this.loadDiscoveredPosts();
@@ -188,32 +193,61 @@ class App {
                 return;
             }
 
-            await new Promise(resolve => setTimeout(resolve, 4000));
+            await new Promise(resolve => setTimeout(resolve, 1200));
         }
 
         status.textContent += ' (stopped watching — the job is still running in the background)';
     }
 
+    showDiscoverySkeleton(on) {
+        document.getElementById('discovered-skeleton').classList.toggle('hidden', !on);
+        if (on) document.getElementById('discovered-empty').classList.add('hidden');
+    }
+
     async loadDiscoveredPosts() {
-        const list = document.getElementById('discovered-list');
-        const empty = document.getElementById('discovered-empty');
         const sort = document.getElementById('discover-sort').value;
         const keyword = document.getElementById('discover-topic').value.trim() || null;
 
         try {
-            const posts = await API.listDiscoveredPosts(keyword, sort);
-            list.innerHTML = '';
-
-            if (!posts.length) {
-                empty.classList.remove('hidden');
-                return;
-            }
-            empty.classList.add('hidden');
-
-            posts.forEach(post => list.appendChild(this.buildDiscoveredCard(post)));
+            this.discoveredPosts = await API.listDiscoveredPosts(keyword, sort);
+            this.renderDiscoveredPage();
         } catch (error) {
             this.showToast(error.message || 'Could not load discovered posts.', 'error');
         }
+    }
+
+    // Renders one page of the already-fetched set. Kept separate from loading so
+    // paging never re-requests — the whole result set is one small response.
+    renderDiscoveredPage() {
+        const list = document.getElementById('discovered-list');
+        const empty = document.getElementById('discovered-empty');
+        const pager = document.getElementById('discovered-pager');
+        const posts = this.discoveredPosts;
+        const size = this.DISCOVER_PAGE_SIZE;
+
+        list.innerHTML = '';
+
+        if (!posts.length) {
+            empty.classList.remove('hidden');
+            pager.classList.add('hidden');
+            return;
+        }
+        empty.classList.add('hidden');
+
+        const pages = Math.max(1, Math.ceil(posts.length / size));
+        // Clamp rather than trust the counter: deleting the last post on the
+        // last page would otherwise leave you on an empty one.
+        this.discoverPage = Math.min(Math.max(this.discoverPage, 0), pages - 1);
+
+        const start = this.discoverPage * size;
+        posts.slice(start, start + size)
+             .forEach(post => list.appendChild(this.buildDiscoveredCard(post)));
+
+        pager.classList.toggle('hidden', pages <= 1);
+        document.getElementById('pager-label').textContent =
+            `${start + 1}–${Math.min(start + size, posts.length)} of ${posts.length}`;
+        pager.querySelector('[data-page="prev"]').disabled = this.discoverPage === 0;
+        pager.querySelector('[data-page="next"]').disabled = this.discoverPage >= pages - 1;
     }
 
     buildDiscoveredCard(post) {
@@ -233,16 +267,35 @@ class App {
         const preview = (post.content_text || post.snippet || '(content removed)')
             .slice(0, 260);
 
+        // The author's own profile, when the parser found it. Linking the name
+        // rather than only the post is what makes a creator followable from here.
+        const author = this.escapeHtml(post.author_name || 'Unknown author');
+        const authorEl = post.author_profile_url
+            ? `<a href="${this.escapeHtml(post.author_profile_url)}" target="_blank"
+                  rel="noopener noreferrer" class="discovered-author">${author}</a>`
+            : `<strong>${author}</strong>`;
+
+        const thumb = post.image_url
+            ? `<img class="discovered-thumb" src="${this.escapeHtml(post.image_url)}"
+                    alt="" loading="lazy">`
+            : '';
+
         card.innerHTML = `
             <div class="discovered-head">
                 <div>
-                    <strong>${this.escapeHtml(post.author_name || 'Unknown author')}</strong>
+                    ${authorEl}
+                    ${post.author_headline
+                        ? `<span class="discovered-headline">${this.escapeHtml(post.author_headline)}</span>`
+                        : ''}
                     <span class="discovered-basis ${post.metrics_source}">${this.escapeHtml(basis)}</span>
                 </div>
                 <a href="${this.escapeHtml(post.post_url)}" target="_blank" rel="noopener noreferrer"
                    class="btn btn-secondary btn-sm">Open ↗</a>
             </div>
-            <p class="discovered-preview">${this.escapeHtml(preview)}</p>
+            <div class="discovered-body">
+                ${thumb}
+                <p class="discovered-preview">${this.escapeHtml(preview)}</p>
+            </div>
             <div class="discovered-actions">
                 <button type="button" class="btn btn-primary btn-sm" data-action="remix" data-id="${post.id}">
                     <i class="fa-solid fa-wand-magic-sparkles"></i> Draft one like this
@@ -406,7 +459,11 @@ class App {
             }
         });
 
-        // Generate AI Text Draft (Styled or Standard)
+        // Generate AI Text Draft.
+        //
+        // Interim state: the styled path went out with the reference subsystem
+        // and the discovery-exemplar path arrives in P4. Until then this is the
+        // plain generator, which never depended on references.
         document.getElementById('btn-generate-text').addEventListener('click', async () => {
             const promptInput = document.getElementById('ai-text-prompt');
             const prompt = promptInput.value.trim();
@@ -418,60 +475,15 @@ class App {
             const btn = document.getElementById('btn-generate-text');
             this.setButtonLoading(btn, true);
 
-            const slug = document.getElementById('create-profile-select').value;
-            const notes = document.getElementById('create-notes-input').value.trim();
-
-            const wordVal = document.getElementById('create-word-count').value;
             const paraVal = document.getElementById('create-para-count').value.trim();
-            const numWords = wordVal === 'auto' ? null : parseInt(wordVal);
             const numParagraphs = paraVal === '' ? null : parseInt(paraVal);
-            
-            const variationVal = document.getElementById('create-variation-count').value;
-            const numVariations = parseInt(variationVal);
-
-            // Read advanced overrides
-            const hookStyle = document.getElementById('create-hook-style').value;
-            const rhythm = document.getElementById('create-rhythm').value;
-            const wordType = document.getElementById('create-word-type').value;
-
-            // Read selected posts
-            const selectedPosts = [];
-            document.querySelectorAll('#creator-posts-list input[type="checkbox"]:checked').forEach(chk => {
-                selectedPosts.push(chk.value);
-            });
 
             try {
-                if (slug === 'none') {
-                    const response = await API.generateText(prompt, numWords, numParagraphs);
-                    textarea.value = response.content;
-                    textarea.dispatchEvent(new Event('input')); // trigger char counter
-                    document.getElementById('variations-selector-container').classList.add('hidden');
-                    this.showToast('Draft content generated!', 'success');
-                } else {
-                    const response = await API.generateStyledPost(
-                        prompt,
-                        notes,
-                        slug,
-                        selectedPosts.length > 0 ? selectedPosts : null,
-                        numWords,
-                        numParagraphs,
-                        numVariations,
-                        hookStyle,
-                        rhythm,
-                        wordType
-                    );
-                    const variations = response.variations;
-                    
-                    if (variations.length === 1) {
-                        textarea.value = variations[0];
-                        textarea.dispatchEvent(new Event('input')); // trigger char counter
-                        document.getElementById('variations-selector-container').classList.add('hidden');
-                        this.showToast('Draft content generated!', 'success');
-                    } else {
-                        this.renderVariationsPicker(variations);
-                        this.showToast(`Generated ${variations.length} drafts! Choose your favorite below.`, 'success');
-                    }
-                }
+                const response = await API.generateText(prompt, null, numParagraphs);
+                textarea.value = response.content;
+                textarea.dispatchEvent(new Event('input')); // trigger char counter
+                document.getElementById('variations-selector-container').classList.add('hidden');
+                this.showToast('Draft content generated!', 'success');
             } catch (error) {
                 this.showToast(error.message || 'Generation failed.', 'error');
             } finally {
@@ -480,11 +492,6 @@ class App {
         });
 
         // Profile select change listener
-        document.getElementById('create-profile-select').addEventListener('change', (e) => {
-            this.loadCreatorStyleProfile(e.target.value);
-            this.refreshRail();
-        });
-
         // Generate AI Image
         document.getElementById('btn-generate-image').addEventListener('click', async () => {
             const promptInput = document.getElementById('ai-image-prompt');
@@ -567,19 +574,22 @@ class App {
         // Discover — find posts for a topic
         document.getElementById('btn-discover-search').addEventListener('click', async () => {
             const topic = document.getElementById('discover-topic').value.trim();
-            if (!topic) {
-                this.showToast('Enter a topic first.', 'warning');
+            const hashtags = document.getElementById('discover-hashtags').value.trim();
+            const timelimit = document.getElementById('discover-timelimit').value || null;
+            if (!topic && !hashtags) {
+                this.showToast('Enter a topic or some hashtags first.', 'warning');
                 return;
             }
 
             const btn = document.getElementById('btn-discover-search');
             const status = document.getElementById('discovery-status');
             this.setButtonLoading(btn, true);
+            this.showDiscoverySkeleton(true);
             status.classList.remove('hidden');
-            status.textContent = `Searching for posts about "${topic}"…`;
+            status.textContent = `Searching for ${topic ? `posts about "${topic}"` : hashtags}…`;
 
             try {
-                const job = await API.discoverPosts(topic, 10);
+                const job = await API.discoverPosts(topic, 30, hashtags || null, timelimit);
                 // The endpoint returns as soon as the job is queued. Reads are
                 // paced ~30s apart deliberately, so a full run takes minutes —
                 // poll and show each post as it lands rather than freezing.
@@ -589,6 +599,7 @@ class App {
                 this.showToast(error.message || 'Discovery failed.', 'error');
             } finally {
                 this.setButtonLoading(btn, false);
+                this.showDiscoverySkeleton(false);
             }
         });
 
@@ -620,11 +631,20 @@ class App {
         });
 
         document.getElementById('discover-sort').addEventListener('change', () => {
+            this.discoverPage = 0;
             this.loadDiscoveredPosts();
         });
 
         document.getElementById('btn-refresh-discovered').addEventListener('click', () => {
+            this.discoverPage = 0;
             this.loadDiscoveredPosts();
+        });
+
+        document.getElementById('discovered-pager').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-page]');
+            if (!btn) return;
+            this.discoverPage += btn.dataset.page === 'next' ? 1 : -1;
+            this.renderDiscoveredPage();
         });
 
         // Refresh History button
@@ -668,10 +688,6 @@ class App {
         }
 
         return {
-            profileSlug: document.getElementById('create-profile-select').value,
-            selectedRefCount: document.querySelectorAll(
-                '#creator-posts-list input[type="checkbox"]:checked'
-            ).length,
             topic: document.getElementById('ai-text-prompt').value.trim(),
             content,
             charCount: content.length,
@@ -1024,207 +1040,6 @@ class App {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
-    }
-
-    // -------------------------------------------------------- CREATOR PROFILES --
-    async initCreatorProfiles() {
-        if (this.creatorProfilesInitialized) return;
-        
-        try {
-            const profiles = await API.listReferenceProfiles();
-            const select = document.getElementById('create-profile-select');
-            
-            // Clear existing options and rebuild list
-            select.innerHTML = `
-                <option value="combined">Combined / Blend of all profiles</option>
-                <option value="none">None (Standard generic generation)</option>
-            `;
-            
-            profiles.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.slug;
-                opt.textContent = `${p.slug} (${p.post_count} posts)`;
-                select.appendChild(opt);
-            });
-            
-            this.creatorProfilesInitialized = true;
-            this.loadCreatorStyleProfile('combined');
-        } catch (e) {
-            console.error("Failed to load reference profiles:", e);
-            this.showToast('Failed to load reference profiles from disk.', 'error');
-        }
-    }
-
-    async loadCreatorStyleProfile(slug) {
-        if (slug === 'none') {
-            document.getElementById('create-style-profile-viewer').classList.add('hidden');
-            document.getElementById('creator-individual-posts-container').classList.add('hidden');
-            return;
-        }
-        try {
-            // Load base directory profile style metrics
-            const defaultStyle = await API.getStyleProfile(slug);
-            this.activeDefaultStyle = defaultStyle; // store default metrics
-            
-            this.updateStyleProfileUI(defaultStyle);
-            document.getElementById('create-style-profile-viewer').classList.remove('hidden');
-
-            // Fetch and render individual posts checkboxes
-            const postsList = document.getElementById('creator-posts-list');
-            postsList.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted); padding: 4px;">Loading individual posts...</span>';
-            document.getElementById('creator-individual-posts-container').classList.remove('hidden');
-
-            const posts = await API.listProfilePosts(slug);
-            this.activePosts = posts; // store loaded posts
-            postsList.innerHTML = '';
-
-            if (posts.length === 0) {
-                postsList.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted); padding: 4px;">No reference posts found.</span>';
-            } else {
-                posts.forEach((post, index) => {
-                    const postCard = document.createElement('div');
-                    postCard.style.display = 'flex';
-                    postCard.style.alignItems = 'flex-start';
-                    postCard.style.gap = '10px';
-                    postCard.style.padding = '8px';
-                    postCard.style.border = '1px solid var(--border-color)';
-                    postCard.style.borderRadius = 'var(--radius-sm)';
-                    postCard.style.background = 'var(--bg-primary)';
-                    postCard.style.cursor = 'pointer';
-                    postCard.style.transition = 'all 0.2s';
-                    postCard.className = 'post-select-card';
-
-                    const cleanId = post.id;
-                    
-                    // Format display label: slug/filename -> filename
-                    const parts = post.id.split('/');
-                    const filename = parts[parts.length - 1];
-
-                    postCard.innerHTML = `
-                        <input type="checkbox" id="post-check-${index}" value="${cleanId}" style="margin-top: 3px; cursor: pointer;">
-                        <div style="display: flex; flex-direction: column; gap: 2px; flex: 1;">
-                            <label for="post-check-${index}" style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); cursor: pointer; margin: 0; display: flex; justify-content: space-between; align-items: center;">
-                                <span>${filename}</span>
-                                <span style="font-size: 0.7rem; font-weight: normal; color: var(--text-muted);">${post.slug}</span>
-                            </label>
-                            <span style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.25;">
-                                "${post.snippet.replace(/"/g, '&quot;')}"
-                            </span>
-                        </div>
-                    `;
-
-                    // Card click toggles checkbox
-                    postCard.addEventListener('click', (e) => {
-                        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') {
-                            const chk = postCard.querySelector('input');
-                            chk.checked = !chk.checked;
-                            chk.dispatchEvent(new Event('change'));
-                        }
-                    });
-
-                    const chk = postCard.querySelector('input');
-                    chk.addEventListener('change', () => {
-                        if (chk.checked) {
-                            postCard.style.borderColor = 'var(--accent-primary, #0a66c2)';
-                            postCard.style.background = 'rgba(10, 102, 194, 0.04)';
-                        } else {
-                            postCard.style.borderColor = 'var(--border-color)';
-                            postCard.style.background = 'var(--bg-primary)';
-                        }
-                        this.handleSelectedPostsChange();
-                    });
-
-                    postsList.appendChild(postCard);
-                });
-            }
-        } catch (e) {
-            console.error("Error loading style profile:", e);
-        }
-    }
-
-    updateStyleProfileUI(style) {
-        document.getElementById('create-style-metric-count').textContent = `${style.sample_count} post${style.sample_count === 1 ? '' : 's'}`;
-        document.getElementById('create-style-metric-words').textContent = Math.round(style.avg_word_count);
-        document.getElementById('create-style-metric-hook').textContent = style.hook_style.replace(/_/g, ' ');
-        document.getElementById('create-style-metric-rhythm').textContent = style.line_rhythm.replace(/_/g, ' ');
-    }
-
-    handleSelectedPostsChange() {
-        this.refreshRail();
-        const checkedVals = [];
-        document.querySelectorAll('#creator-posts-list input[type="checkbox"]:checked').forEach(chk => {
-            checkedVals.push(chk.value);
-        });
-
-        if (checkedVals.length === 0) {
-            // Revert to folder-wide default style metrics
-            if (this.activeDefaultStyle) {
-                this.updateStyleProfileUI(this.activeDefaultStyle);
-            }
-            return;
-        }
-
-        // Calculate dynamic style metrics based on selected posts
-        const selectedPostsData = this.activePosts.filter(p => checkedVals.includes(p.id));
-        const dynamicStyle = this.calculateStyleFromPosts(selectedPostsData);
-        if (dynamicStyle) {
-            this.updateStyleProfileUI(dynamicStyle);
-        }
-    }
-
-    calculateStyleFromPosts(checkedPosts) {
-        if (checkedPosts.length === 0) return null;
-        
-        let totalWords = 0;
-        let totalLines = 0;
-        const hookStyles = [];
-        
-        checkedPosts.forEach(post => {
-            const words = post.full_text.split(/\s+/).filter(w => w.length > 0);
-            const lines = post.full_text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            
-            totalWords += words.length;
-            totalLines += lines.length;
-            
-            if (lines.length > 0) {
-                const firstLine = lines[0];
-                if (firstLine.endsWith('?')) {
-                    hookStyles.push('question');
-                } else if (/^\d/.test(firstLine)) {
-                    hookStyles.push('stat_or_number');
-                } else if (firstLine.split(/\s+/).length <= 8) {
-                    hookStyles.push('bold_statement');
-                } else {
-                    hookStyles.push('story_open');
-                }
-            }
-        });
-        
-        const avgWords = Math.round(totalWords / checkedPosts.length);
-        const avgLines = totalLines / checkedPosts.length;
-        
-        const mode = arr => {
-            const counts = {};
-            let maxCount = 0;
-            let maxVal = null;
-            arr.forEach(val => {
-                counts[val] = (counts[val] || 0) + 1;
-                if (counts[val] > maxCount) {
-                    maxCount = counts[val];
-                    maxVal = val;
-                }
-            });
-            return maxVal;
-        };
-        const commonHook = mode(hookStyles) || 'story_open';
-        const rhythm = (totalWords / Math.max(totalLines, 1)) < 12 ? 'short_punchy' : 'flowing_paragraphs';
-        
-        return {
-            sample_count: checkedPosts.length,
-            avg_word_count: avgWords,
-            hook_style: commonHook,
-            line_rhythm: rhythm
-        };
     }
 
     renderVariationsPicker(variations) {

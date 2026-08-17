@@ -67,7 +67,7 @@ def _has_cta(text: str) -> bool:
 
 def extract_style_profile(posts: list[str]) -> StyleProfile:
     """
-    posts: raw text of reference posts (from reference_loader). Pass a
+    posts: raw text of the exemplar post(s) being profiled. Pass a
     single profile's posts for a per-creator style, or the combined
     list from load_all_posts() for a blended style.
     """

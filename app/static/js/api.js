@@ -119,14 +119,13 @@ const API = {
     },
 
     // Find posts for a topic. Returns a job row with real counts.
-    async discoverPosts(keyword, limit = 10) {
+    async discoverPosts(keyword, limit = 30, hashtags = null, timelimit = null) {
         return this.request('/discovery/search', {
             method: 'POST',
-            body: JSON.stringify({ keyword, limit })
+            body: JSON.stringify({ keyword, limit, hashtags, timelimit })
         });
     },
 
-    // Progress of a background discovery job.
     async getDiscoveryJob(jobId) {
         return this.request(`/discovery/jobs/${jobId}`);
     },
@@ -199,38 +198,12 @@ const API = {
     // ----------------------------------------------------------- STYLE WIZARD --
 
     // List loaded reference profiles
-    async listReferenceProfiles() {
-        return this.request('/reference/profiles');
-    },
 
     // List individual reference posts for a profile/slug
-    async listProfilePosts(slug) {
-        return this.request(`/reference/profile-posts/${slug}`);
-    },
 
     // Get the extracted StyleProfile for a slug
-    async getStyleProfile(slug) {
-        return this.request(`/reference/style-profile/${slug}`);
-    },
 
     // Generate style-conditioned post content
-    async generateStyledPost(topic, notes, slug, selectedPosts = null, numWords = null, numParagraphs = null, numVariations = 1, hookStyle = null, rhythm = null, wordType = null) {
-        return this.request('/generate/styled-post', {
-            method: 'POST',
-            body: JSON.stringify({
-                topic,
-                user_notes: notes,
-                profile_slug: slug,
-                selected_posts: selectedPosts,
-                num_words: numWords,
-                num_paragraphs: numParagraphs,
-                num_variations: numVariations,
-                hook_style: hookStyle,
-                line_rhythm: rhythm,
-                word_type: wordType
-            })
-        });
-    },
 
     // Generate image from structured image prompt derived from post text
     async generateStyledImage(postText) {

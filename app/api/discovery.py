@@ -15,6 +15,7 @@ from app.services.discovery.fetcher import fetcher
 from app.services.discovery.providers import (
     available_providers,
     get_provider,
+    normalise_hashtags,
     normalise_post_url,
 )
 from app.services.discovery.service import (
@@ -29,8 +30,11 @@ router = APIRouter(prefix="/discovery", tags=["discovery"])
 
 class SearchRequest(BaseModel):
     keyword: str
-    limit: int = 10
+    limit: int = 25
     provider: str | None = None
+    # Free-form: "#ai, buildinpublic" and ["#AI"] both normalise the same way.
+    hashtags: str | list[str] | None = None
+    timelimit: str | None = None      # d | w | m | y — None means any time
 
 
 class JobResponse(BaseModel):
@@ -54,6 +58,7 @@ class DiscoveredPostResponse(BaseModel):
     post_url: str
     author_name: str | None
     author_headline: str | None
+    author_profile_url: str | None
     content_text: str | None
     snippet: str | None
     hashtags: list[str]
@@ -78,6 +83,9 @@ class StatusResponse(BaseModel):
     available_egress: list[str]
     daily_cap: int
     remaining_today: int
+    requests_per_second: float
+    concurrency: int
+    concurrency_max: int
     circuits: dict
 
 
@@ -105,6 +113,7 @@ def _post_to_response(post: DiscoveredPost) -> DiscoveredPostResponse:
         post_url=post.post_url,
         author_name=post.author_name,
         author_headline=post.author_headline,
+        author_profile_url=post.author_profile_url,
         content_text=post.content_text,
         snippet=post.snippet,
         hashtags=post.hashtags or [],
@@ -134,6 +143,9 @@ async def discovery_status() -> StatusResponse:
         available_egress=available_strategies(),
         daily_cap=state["daily_cap"],
         remaining_today=state["remaining_today"],
+        requests_per_second=state["requests_per_second"],
+        concurrency=state["concurrency"],
+        concurrency_max=state["concurrency_max"],
         circuits=state["circuits"],
     )
 
@@ -146,24 +158,31 @@ async def search(
 ) -> JobResponse:
     """Start discovering posts for a topic. Returns immediately.
 
-    The work runs in the background because the fetcher deliberately paces at
-    ~30s per post — a ten-post run takes over five minutes. Doing that inside
-    the request meant the client blocked for the whole run AND saw nothing when
-    it finished polling, because the single request transaction had not
-    committed yet. Poll GET /discovery/jobs/{id} for progress; posts become
-    queryable one at a time as they are stored.
+    Still a background job even though fetching is now parallel. Two reasons it
+    cannot move back into the request: a run is seconds rather than
+    milliseconds, and the single request transaction would not commit until the
+    end — so a client polling mid-run would see nothing at all. Poll
+    GET /discovery/jobs/{id}; posts become queryable a wave at a time.
     """
     keyword = body.keyword.strip()
-    if not keyword:
-        raise HTTPException(status_code=400, detail="A keyword is required")
 
     provider = get_provider(body.provider)
+    hashtags = normalise_hashtags(body.hashtags)
+    timelimit = body.timelimit if body.timelimit in ("d", "w", "m", "y") else None
+
+    if not keyword and not hashtags:
+        raise HTTPException(
+            status_code=400, detail="Give a topic, some hashtags, or both"
+        )
+
     job = DiscoveryJob(
         user_id=user_id,
         keyword=keyword,
         provider=provider.name,
         status="queued",
-        requested_count=max(1, min(25, body.limit)),
+        requested_count=max(1, min(30, body.limit)),
+        hashtags=hashtags or None,
+        timelimit=timelimit,
     )
     db.add(job)
     # Commit before handing the id to a background task with its own session —

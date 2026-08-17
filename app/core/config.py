@@ -68,15 +68,37 @@ class Settings(BaseSettings):
 
     # Discovery — throttles. Enforced above the egress layer so they apply
     # identically to every strategy.
-    discovery_min_interval_seconds: float = 30.0
-    discovery_jitter_seconds: float = 10.0
-    discovery_daily_fetch_cap: int = 40
+    #
+    # requests_per_second is the safety knob; concurrency follows from it.
+    # Profiling (notes/PLAN-2026-08-17…, §2.1) showed in-flight requests are
+    # governed by rate x latency, so at these rates 3 workers is the knee —
+    # 6 and 12 measured exactly as fast and only sent more requests after a
+    # block. Lower requests_per_second first if blocks appear; do not raise
+    # concurrency expecting it to help.
+    discovery_requests_per_second: float = 2.0
+    discovery_concurrency: int = 3
+    discovery_concurrency_max: int = 6      # ceiling for the adaptive ramp
+    discovery_adaptive: bool = True
+    discovery_ramp_after: int = 5           # consecutive successes per ramp step
+    # Burst of 1: a bucket that starts full fires `rate` requests simultaneously
+    # on the first tick. Measured at an 8/s cap: 10.72/s observed with a full
+    # bucket, 7.93/s with a burst of 1.
+    discovery_token_burst: float = 1.0
+
+    # Optional extra floor between requests. 0 means the token bucket alone
+    # paces; kept as an escape hatch for going back to serial-ish behaviour
+    # without a code change.
+    discovery_min_interval_seconds: float = 0.0
+    discovery_jitter_seconds: float = 0.0
+
+    # A backstop, not a pacer — the token bucket does the pacing now.
+    discovery_daily_fetch_cap: int = 300
     discovery_circuit_threshold: int = 3
     discovery_circuit_cooldown_hours: int = 24
     discovery_fetch_timeout: int = 20
 
     # Discovery — retention
-    discovery_retention_days: int = 90
+    discovery_retention_days: int = 30
 
     # Ranking weights (hybrid score — see plan 3.9)
     rank_w_reactions: float = 1.0

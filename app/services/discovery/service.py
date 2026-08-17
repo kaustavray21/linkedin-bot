@@ -7,13 +7,20 @@ Ordering matters here. Candidates are deduped against the database *before* any
 fetching, so a post already seen is never requested from LinkedIn again. With a
 daily fetch cap in force, spending budget re-reading known posts would mean
 fewer new ones — the cache is a capacity decision, not just a speed one.
+
+Fetching runs in parallel; persistence does not. AsyncSession is documented as
+"not safe for use in concurrent tasks", so the fetch workers never touch `db` —
+they return their results and this module writes them one at a time. Dispatch
+happens in waves so an early stop still bounds how much budget is spent.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -69,6 +76,8 @@ async def run_discovery(
     commit_each: bool = False,
     stop_after_usable: int | None = None,
     job: DiscoveryJob | None = None,
+    hashtags: list[str] | None = None,
+    timelimit: str | None = None,
 ) -> DiscoveryJob:
     """Discover posts for `keyword` and persist whatever could be read.
 
@@ -108,7 +117,9 @@ async def run_discovery(
 
     await _save()
 
-    outcome = await provider.search(keyword, limit)
+    outcome = await provider.search(
+        keyword, limit, hashtags=hashtags, timelimit=timelimit
+    )
     job.found_count = len(outcome.candidates)
 
     if outcome.error and not outcome.candidates:
@@ -137,38 +148,86 @@ async def run_discovery(
     stored = 0
     usable = 0
     parse_failures = 0
+    collisions = 0
     stop_reason: str | None = None
 
-    for candidate in fresh:
+    async def _fetch_one(candidate: DiscoveredCandidate):
+        """Runs concurrently. Touches the network and nothing else.
+
+        Specifically, it never touches `db`. AsyncSession is documented as "not
+        safe for use in concurrent tasks", and interleaving fetches with writes
+        — as this function's caller used to — raises "Session is already
+        flushing" the moment the loop goes parallel. Fetch in parallel, write
+        serially: this is the parallel half.
+        """
         try:
-            result = await fetcher.fetch(candidate.post_url)
+            return candidate, await fetcher.fetch(candidate.post_url), None
         except EgressError as exc:
-            # Budget exhausted or circuit open. Both mean stop the whole run —
-            # continuing would just burn through the remaining candidates
-            # producing identical failures.
-            stop_reason = str(exc)
-            log.warning("Halting discovery run", reason=stop_reason)
+            return candidate, None, exc
+
+    # Dispatched in waves rather than all at once so `stop_after_usable` still
+    # means something. A single gather over every candidate spends the whole
+    # budget before the first result lands; a wave bounds the overshoot to the
+    # worker count.
+    wave_size = max(1, settings.discovery_concurrency_max)
+
+    for offset in range(0, len(fresh), wave_size):
+        if fetcher.any_circuit_open():
+            stop_reason = "All egress strategies are cooling down after repeated blocks."
+            log.warning("Halting discovery run before dispatch", reason=stop_reason)
             break
 
-        parsed = parse_post(result)
-        if parsed.has_content:
-            usable += 1
-        else:
-            parse_failures += 1
+        wave = fresh[offset : offset + wave_size]
+        results = await asyncio.gather(*(_fetch_one(c) for c in wave))
 
-        post = _build_post(candidate, parsed, keyword, user_id)
-        db.add(post)
-        stored += 1
+        # Serial section — one task, one session.
+        for candidate, result, error in results:
+            if error is not None:
+                # Budget exhausted or circuit open. Both mean stop the whole run
+                # — continuing would just burn through the remaining candidates
+                # producing identical failures.
+                stop_reason = str(error)
+                continue
 
-        # Update counts alongside the post itself, so a caller polling the job
-        # sees progress that matches what is actually queryable.
+            parsed = parse_post(result)
+            if parsed.has_content:
+                usable += 1
+            else:
+                parse_failures += 1
+
+            post = _build_post(candidate, parsed, keyword, user_id)
+            try:
+                # Savepoint per row: two jobs searching at once can both reach
+                # the same URL after the dedup check above, and `post_url` is
+                # unique. Without this, one duplicate aborts the whole run.
+                async with db.begin_nested():
+                    db.add(post)
+            except IntegrityError:
+                collisions += 1
+                continue
+
+            stored += 1
+
+        # Counts are written alongside the posts themselves, so a caller polling
+        # the job sees progress that matches what is actually queryable.
         job.fetched_count = stored
         job.parse_failures = parse_failures
         await _save()
 
-        if stop_after_usable is not None and usable >= stop_after_usable:
-            log.info("Stopping early — enough usable posts", usable=usable)
+        if stop_reason:
+            log.warning("Halting discovery run", reason=stop_reason)
             break
+
+        if stop_after_usable is not None and usable >= stop_after_usable:
+            log.info(
+                "Stopping early — enough usable posts",
+                usable=usable,
+                fetched=offset + len(wave),
+            )
+            break
+
+    if collisions:
+        log.info("Absorbed duplicate posts already stored", count=collisions)
 
     job.fetched_count = stored
     job.parse_failures = parse_failures
@@ -222,6 +281,8 @@ async def execute_job(job_id: int) -> None:
                 user_id=job.user_id,
                 commit_each=True,
                 job=job,
+                hashtags=job.hashtags or None,
+                timelimit=job.timelimit,
             )
         except Exception as exc:
             log.exception("Discovery job failed", job_id=job_id)
@@ -243,8 +304,6 @@ async def execute_job(job_id: int) -> None:
 
 def start_job(job_id: int) -> None:
     """Fire a discovery job into the background and keep a reference to it."""
-    import asyncio
-
     task = asyncio.create_task(execute_job(job_id))
     _running_jobs.add(task)
     task.add_done_callback(_running_jobs.discard)

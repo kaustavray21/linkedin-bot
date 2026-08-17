@@ -19,6 +19,7 @@ def _post_to_response(post: Post) -> PostResponse:
         user_id=post.user_id,
         content=post.content,
         image_url=post.image_url,
+        image_source=post.image_source,
         status=post.status,
         linkedin_post_id=post.linkedin_post_id,
         scheduled_time=post.scheduled_time,
@@ -40,6 +41,7 @@ async def create_post(
             user_id=user_id,
             content=body.content,
             image_url=body.image_url,
+            image_source=body.image_source,
             scheduled_time=body.scheduled_time,
         )
         return _post_to_response(post)
@@ -80,12 +82,12 @@ async def update_post(
 ):
     service = PostService(db)
     try:
+        # exclude_unset is what separates "leave this alone" from "clear this".
+        # Passing body.image_url directly would collapse both into None again.
         post = await service.update_draft(
             post_id=post_id,
             user_id=user_id,
-            content=body.content,
-            image_url=body.image_url,
-            scheduled_time=body.scheduled_time,
+            **body.model_dump(exclude_unset=True),
         )
         return _post_to_response(post)
     except AppException as e:

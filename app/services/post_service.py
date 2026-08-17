@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import POST_STATUS_DRAFT, POST_STATUS_FAILED, POST_STATUS_PUBLISHED, POST_STATUS_PUBLISHING, POST_STATUS_SCHEDULED
-from app.core.exceptions import ValidationException, NotFoundException
+from app.core.exceptions import ConflictException, ValidationException, NotFoundException
 from app.core.logger import get_logger
 from app.database.models import Post
 from app.repositories.post_repository import PostRepository
@@ -15,36 +15,88 @@ from app.services.token_service import TokenService
 log = get_logger()
 
 
+class _Unset:
+    """Marker for "this field was not supplied".
+
+    `None` cannot carry that meaning here: clearing an image and leaving it
+    alone are different operations, and both arrive as None. The old
+    `if value is not None` treated them identically, which is why an image
+    could never be removed and a scheduled post could never be un-scheduled.
+    """
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return "UNSET"
+
+
+UNSET = _Unset()
+
+# Editing a post that is already out, or on its way out, is not an input error
+# the caller can fix by retrying with a better payload — the window simply
+# closed. Guarded in the service rather than only in the UI because an autosave
+# timer or an in-flight request can land after publish, and rewriting the row
+# then would leave history showing text that never appeared on LinkedIn.
+_UNEDITABLE_STATUSES = (POST_STATUS_PUBLISHED, POST_STATUS_PUBLISHING)
+
+
 class PostService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.post_repo = PostRepository(session)
         self.token_service = TokenService(session)
 
-    async def create_draft(self, user_id: int, content: str, image_url: str | None = None, scheduled_time=None) -> Post:
+    async def create_draft(
+        self,
+        user_id: int,
+        content: str,
+        image_url: str | None = None,
+        scheduled_time=None,
+        image_source: str | None = None,
+    ) -> Post:
         status = POST_STATUS_SCHEDULED if scheduled_time else POST_STATUS_DRAFT
         post = await self.post_repo.create(
             user_id=user_id,
             content=content,
             image_url=image_url,
+            image_source=image_source,
             status=status,
             scheduled_time=scheduled_time,
         )
         log.info("Draft created", post_id=post.id, user_id=user_id, status=status)
         return post
 
-    async def update_draft(self, post_id: int, user_id: int, content: str | None = None, image_url: str | None = None, scheduled_time=None) -> Post:
+    async def update_draft(
+        self,
+        post_id: int,
+        user_id: int,
+        content=UNSET,
+        image_url=UNSET,
+        scheduled_time=UNSET,
+        image_source=UNSET,
+    ) -> Post:
+        """Update a draft. Omitted fields are untouched; explicit None clears.
+
+        Callers that pass nothing for a field keep the previous behaviour
+        exactly — the difference is only that passing None now means something.
+        """
         post = await self.post_repo.get_by_id(post_id)
         if not post or post.user_id != user_id:
             raise NotFoundException("Post not found")
 
+        if post.status in _UNEDITABLE_STATUSES:
+            raise ConflictException(
+                f"This post is {post.status} and can no longer be edited."
+            )
+
         updates: dict = {}
-        if content is not None:
+        if content is not UNSET:
             updates["content"] = content
-        if image_url is not None:
+        if image_url is not UNSET:
             updates["image_url"] = image_url
-        if scheduled_time is not None:
+        if image_source is not UNSET:
+            updates["image_source"] = image_source
+        if scheduled_time is not UNSET:
             updates["scheduled_time"] = scheduled_time
+            # Clearing the time un-schedules the post; setting one schedules it.
             updates["status"] = POST_STATUS_SCHEDULED if scheduled_time else POST_STATUS_DRAFT
 
         if updates:

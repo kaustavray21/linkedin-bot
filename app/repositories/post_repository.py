@@ -21,11 +21,13 @@ class PostRepository:
         status: str = "draft",
         image_url: str | None = None,
         scheduled_time=None,
+        image_source: str | None = None,
     ) -> Post:
         post = Post(
             user_id=user_id,
             content=content,
             image_url=image_url,
+            image_source=image_source,
             status=status,
             scheduled_time=scheduled_time,
         )

@@ -64,7 +64,14 @@ class SearchOutcome:
 class DiscoveryProvider(Protocol):
     name: str
 
-    async def search(self, keyword: str, limit: int) -> SearchOutcome: ...
+    async def search(
+        self,
+        keyword: str,
+        limit: int,
+        *,
+        hashtags: list[str] | None = None,
+        timelimit: str | None = None,
+    ) -> SearchOutcome: ...
 
 
 def normalise_post_url(url: str) -> str | None:
@@ -80,20 +87,61 @@ def normalise_post_url(url: str) -> str | None:
     return cleaned or None
 
 
-def build_queries(keyword: str) -> list[str]:
-    """A few angles on the same topic — one phrasing finds one slice of results."""
+def normalise_hashtags(raw: str | list[str] | None) -> list[str]:
+    """Accept '#ai, buildinpublic' or ['#ai'] and return ['#ai', '#buildinpublic'].
+
+    Typed input arrives in every shape a person might use — with or without the
+    hash, comma or space separated. Normalising here keeps the query builder
+    from having to care.
+    """
+    if not raw:
+        return []
+    parts = re.split(r"[,\s]+", raw) if isinstance(raw, str) else list(raw)
+    out: list[str] = []
+    for part in parts:
+        tag = part.strip().lstrip("#")
+        if not tag:
+            continue
+        tag = f"#{tag}"
+        if tag.lower() not in {o.lower() for o in out}:
+            out.append(tag)
+    return out
+
+
+def build_queries(keyword: str, hashtags: list[str] | None = None) -> list[str]:
+    """A few angles on the same topic — one phrasing finds one slice of results.
+
+    Hashtags, when given, are searched as their own angle rather than being
+    appended to every query: a post tagged #BuildInPublic often does not repeat
+    the topic words in its body, so folding the tag into the keyword queries
+    would narrow results instead of widening them.
+    """
     keyword = keyword.strip()
-    return [
+    queries = [
         f'site:linkedin.com/posts "{keyword}"',
         f"site:linkedin.com/posts {keyword}",
         f'site:linkedin.com/posts {keyword} "lessons"',
     ]
 
+    for tag in (hashtags or [])[:3]:
+        queries.append(f'site:linkedin.com/posts "{tag}"')
+        if keyword:
+            queries.append(f'site:linkedin.com/posts {keyword} "{tag}"')
+
+    return queries
+
 
 class DuckDuckGoProvider:
     name = "ddg"
 
-    async def search(self, keyword: str, limit: int) -> SearchOutcome:
+    async def search(
+        self,
+        keyword: str,
+        limit: int,
+        *,
+        hashtags: list[str] | None = None,
+        timelimit: str | None = None,
+    ) -> SearchOutcome:
         outcome = SearchOutcome(provider=self.name)
         try:
             from ddgs import DDGS
@@ -106,10 +154,15 @@ class DuckDuckGoProvider:
         def _run() -> list[DiscoveredCandidate]:
             found: list[DiscoveredCandidate] = []
             with DDGS() as ddgs:
-                for query in build_queries(keyword):
+                for query in build_queries(keyword, hashtags):
                     outcome.queries_run.append(query)
                     try:
-                        results = list(ddgs.text(query, max_results=limit))
+                        # timelimit is d|w|m|y — verified against
+                        # ddgs.DDGS._search_sync's signature, not assumed.
+                        kwargs = {"max_results": limit}
+                        if timelimit:
+                            kwargs["timelimit"] = timelimit
+                        results = list(ddgs.text(query, **kwargs))
                     except Exception as exc:  # the library raises many shapes
                         log.warning("ddg query failed", query=query, error=str(exc))
                         continue
@@ -143,20 +196,30 @@ class DuckDuckGoProvider:
 class SearxngProvider:
     name = "searxng"
 
-    async def search(self, keyword: str, limit: int) -> SearchOutcome:
+    async def search(
+        self,
+        keyword: str,
+        limit: int,
+        *,
+        hashtags: list[str] | None = None,
+        timelimit: str | None = None,
+    ) -> SearchOutcome:
         outcome = SearchOutcome(provider=self.name)
         seen: set[str] = set()
         base = settings.searxng_url.rstrip("/")
 
         try:
             async with httpx.AsyncClient(timeout=20) as client:
-                for query in build_queries(keyword):
+                for query in build_queries(keyword, hashtags):
                     outcome.queries_run.append(query)
+                    params = {"q": query, "format": "json", "categories": "general"}
+                    if timelimit:
+                        # SearXNG spells it differently to ddgs; same buckets.
+                        params["time_range"] = {
+                            "d": "day", "w": "week", "m": "month", "y": "year",
+                        }.get(timelimit, "")
                     try:
-                        response = await client.get(
-                            f"{base}/search",
-                            params={"q": query, "format": "json", "categories": "general"},
-                        )
+                        response = await client.get(f"{base}/search", params=params)
                     except httpx.HTTPError as exc:
                         log.warning("SearXNG query failed", query=query, error=str(exc))
                         continue
@@ -198,7 +261,14 @@ class ManualProvider:
 
     name = "manual"
 
-    async def search(self, keyword: str, limit: int) -> SearchOutcome:
+    async def search(
+        self,
+        keyword: str,
+        limit: int,
+        *,
+        hashtags: list[str] | None = None,
+        timelimit: str | None = None,
+    ) -> SearchOutcome:
         outcome = SearchOutcome(provider=self.name)
         url = normalise_post_url(keyword)
         if url:

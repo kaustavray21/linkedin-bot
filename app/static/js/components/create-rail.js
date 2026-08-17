@@ -84,13 +84,14 @@ export class CreateRail extends Component {
     }
 
     statusAi(post) {
-        if (!post.profileSlug || post.profileSlug === 'none') {
-            return { markup: html`no style`, tone: 'muted' };
+        // Shows the topic until the discovery-exemplar picker lands in P4;
+        // the reference-profile summary that stood here went out with the
+        // reference subsystem.
+        if (!post.topic) {
+            return { markup: html`no topic`, tone: 'muted' };
         }
-        const refs = post.selectedRefCount
-            ? html` · ${post.selectedRefCount} ref${post.selectedRefCount === 1 ? '' : 's'}`
-            : '';
-        return { markup: html`${post.profileSlug}` + refs, tone: null };
+        const short = post.topic.length > 24 ? `${post.topic.slice(0, 24)}…` : post.topic;
+        return { markup: html`${short}`, tone: 'ok' };
     }
 
     statusBody(post) {

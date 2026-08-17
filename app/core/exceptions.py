@@ -51,3 +51,17 @@ class NotFoundException(AppException):
 
     def __init__(self, detail: str = "Resource not found") -> None:
         super().__init__(detail)
+
+
+class ConflictException(AppException):
+    """The resource exists but is in a state that forbids the operation.
+
+    Distinct from ValidationException on purpose: the request was well formed,
+    it just arrived too late — editing a post that has already gone out, for
+    instance. A 422 would suggest the caller should fix the payload and retry.
+    """
+
+    status_code = 409
+
+    def __init__(self, detail: str = "Conflicting state") -> None:
+        super().__init__(detail)

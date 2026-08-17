@@ -84,29 +84,6 @@ class ApiLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
-class ReferenceProfile(Base):
-    __tablename__ = "reference_profiles"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    profile_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    posts: Mapped[list[ReferencePost]] = relationship(back_populates="profile", cascade="all, delete-orphan")
-
-
-class ReferencePost(Base):
-    __tablename__ = "reference_posts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    profile_id: Mapped[int] = mapped_column(Integer, ForeignKey("reference_profiles.id", ondelete="CASCADE"), nullable=False)
-    filename: Mapped[str] = mapped_column(String(100), nullable=False)
-    full_text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    profile: Mapped[ReferenceProfile] = relationship(back_populates="posts")
-
-
 class DiscoveredPost(Base):
     """A public LinkedIn post found by the discovery pipeline.
 
@@ -166,6 +143,11 @@ class DiscoveryJob(Base):
     keyword: Mapped[str] = mapped_column(String(255), nullable=False)
     provider: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="queued", nullable=False)
+
+    # Persisted because the run happens in a background task that re-reads this
+    # row — anything not stored here is lost between queueing and executing.
+    hashtags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    timelimit: Mapped[str | None] = mapped_column(String(10), nullable=True)  # d|w|m|y
 
     requested_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     found_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -1594,3 +1594,98 @@ confirm-modal {
         border-bottom-color: var(--color-primary);
     }
 }
+
+/* ==========================================================================
+   DISCOVERY — search options, skeletons, pagination, richer cards
+   ========================================================================== */
+.discover-window {
+    flex: 0 0 130px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+}
+
+/* Left-aligned and small: this is one action among several, not the page's
+   primary call to action. */
+.discover-actions {
+    display: flex;
+    justify-content: flex-start;
+}
+
+.discovered-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.skel-card {
+    height: 96px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.02) 25%,
+        rgba(255, 255, 255, 0.06) 37%,
+        rgba(255, 255, 255, 0.02) 63%
+    );
+    background-size: 400% 100%;
+    animation: skel-sweep 1.4s ease infinite;
+}
+
+@keyframes skel-sweep {
+    0%   { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+.discovered-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 16px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.discovered-pager .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.discovered-body {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.discovered-thumb {
+    flex: 0 0 84px;
+    width: 84px;
+    height: 84px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.discovered-author {
+    font-weight: 700;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+
+.discovered-author:hover {
+    color: var(--color-linkedin);
+    text-decoration: underline;
+}
+
+.discovered-headline {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}

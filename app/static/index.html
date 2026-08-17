@@ -177,10 +177,24 @@
                                     </button>
                                 </div>
 
-                                <button type="button" id="btn-auto-draft" class="btn btn-primary btn-block">
-                                    <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
-                                    <span class="btn-text"><i class="fa-solid fa-wand-magic-sparkles"></i> Find &amp; draft automatically</span>
-                                </button>
+                                <div class="input-group">
+                                    <input type="text" id="discover-hashtags"
+                                           placeholder="Hashtags to search (e.g. #buildinpublic, #ai)">
+                                    <select id="discover-timelimit" class="form-control discover-window">
+                                        <option value="">Any time</option>
+                                        <option value="d">Past day</option>
+                                        <option value="w">Past week</option>
+                                        <option value="m" selected>Past month</option>
+                                        <option value="y">Past year</option>
+                                    </select>
+                                </div>
+
+                                <div class="discover-actions">
+                                    <button type="button" id="btn-auto-draft" class="btn btn-primary btn-sm">
+                                        <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                        <span class="btn-text"><i class="fa-solid fa-wand-magic-sparkles"></i> Find &amp; draft</span>
+                                    </button>
+                                </div>
 
                                 <p class="help-text" id="discovery-budget-note">
                                     Posts are read without signing in — your LinkedIn account is never used for this.
@@ -204,7 +218,21 @@
                                 </div>
                             </div>
                             <div class="card-body">
+                                <div id="discovered-skeleton" class="hidden discovered-skeleton">
+                                    <div class="skel-card"></div>
+                                    <div class="skel-card"></div>
+                                    <div class="skel-card"></div>
+                                </div>
                                 <div id="discovered-list" style="display: flex; flex-direction: column; gap: 12px;"></div>
+                                <div id="discovered-pager" class="discovered-pager hidden">
+                                    <button type="button" class="btn btn-secondary btn-sm" data-page="prev">
+                                        <i class="fa-solid fa-arrow-left"></i>
+                                    </button>
+                                    <span id="pager-label"></span>
+                                    <button type="button" class="btn btn-secondary btn-sm" data-page="next">
+                                        <i class="fa-solid fa-arrow-right"></i>
+                                    </button>
+                                </div>
                                 <div id="discovered-empty" class="empty-state">
                                     <i class="fa-solid fa-inbox"></i>
                                     <h4>Nothing discovered yet</h4>
@@ -231,45 +259,13 @@
                                                  <h4>AI Copywriter & Style Assistant</h4>
                                              </div>
                                              <div class="ai-assist-body" style="display: flex; flex-direction: column; gap: 16px;">
-                                                 <!-- Creator Style Selection -->
-                                                 <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                                                     <label for="create-profile-select" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Select Reference Creator Style</label>
-                                                     <select id="create-profile-select" class="form-control" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem;">
-                                                         <option value="combined">Combined / Blend of all profiles</option>
-                                                         <option value="none">None (Standard generic generation)</option>
-                                                     </select>
-                                                 </div>
-
-                                                 <!-- Individual Posts Selection Container -->
-                                                 <div id="creator-individual-posts-container" class="hidden" style="display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; background: rgba(255, 255, 255, 0.01);">
-                                                     <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px;">Select Specific Reference Posts (Optional)</label>
-                                                     <div id="creator-posts-list" style="display: grid; grid-template-columns: 1fr; gap: 8px; max-height: 185px; overflow-y: auto; padding: 4px;">
-                                                         <!-- Checkboxes rendered dynamically via js -->
-                                                     </div>
-                                                 </div>
-
-                                                 <!-- Style Profile Analysis (Collapsible/Hidden by default, shown when style is selected) -->
-                                                 <div id="create-style-profile-viewer" class="hidden" style="background: rgba(255, 255, 255, 0.01); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px;">
-                                                     <span class="metric-label" style="font-size: 0.7rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase;">Style Analysis</span>
-                                                     <div class="style-profile-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 6px;">
-                                                         <div class="metric-card" style="padding: 6px 10px;">
-                                                             <span class="metric-label" style="font-size: 0.65rem;">Sample Count</span>
-                                                             <span class="metric-value" id="create-style-metric-count" style="font-size: 0.85rem;">-</span>
-                                                         </div>
-                                                         <div class="metric-card" style="padding: 6px 10px;">
-                                                             <span class="metric-label" style="font-size: 0.65rem;">Avg Words</span>
-                                                             <span class="metric-value" id="create-style-metric-words" style="font-size: 0.85rem;">-</span>
-                                                         </div>
-                                                         <div class="metric-card" style="padding: 6px 10px;">
-                                                             <span class="metric-label" style="font-size: 0.65rem;">Hook Style</span>
-                                                             <span class="metric-value" id="create-style-metric-hook" style="font-size: 0.85rem;">-</span>
-                                                         </div>
-                                                         <div class="metric-card" style="padding: 6px 10px;">
-                                                             <span class="metric-label" style="font-size: 0.65rem;">Rhythm</span>
-                                                             <span class="metric-value" id="create-style-metric-rhythm" style="font-size: 0.85rem;">-</span>
-                                                         </div>
-                                                     </div>
-                                                 </div>
+                                                 <!-- Exemplar source. The reference-file picker that stood here is
+                                                      gone; P4 replaces it with a picker over discovered posts.
+                                                      Until then Generate Draft uses the plain text path. -->
+                                                 <p class="help-text" id="exemplar-placeholder" style="margin: 0;">
+                                                     Drafting from discovered posts arrives with the Discovery picker.
+                                                     For now, enter a topic below for a plain draft.
+                                                 </p>
 
                                                  <!-- Notes Field -->
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
@@ -279,28 +275,9 @@
 
                                                  <!-- Length, Formatting & Variations Options -->
                                                  <div style="display: flex; gap: 12px;">
-                                                     <div class="form-group" style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
-                                                         <label for="create-word-count" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Word Count</label>
-                                                         <select id="create-word-count" class="form-control" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem;">
-                                                             <option value="auto">Auto (Style Default)</option>
-                                                             <option value="50">50 Words</option>
-                                                             <option value="100">100 Words</option>
-                                                             <option value="150">150 Words</option>
-                                                             <option value="250">250 Words</option>
-                                                             <option value="500">500 Words</option>
-                                                         </select>
-                                                     </div>
-                                                     <div class="form-group" style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
+<div class="form-group" style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
                                                          <label for="create-para-count" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Paragraphs</label>
                                                          <input type="number" id="create-para-count" min="1" max="10" placeholder="Auto" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem;">
-                                                     </div>
-                                                     <div class="form-group" style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
-                                                         <label for="create-variation-count" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Variations</label>
-                                                         <select id="create-variation-count" class="form-control" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem;">
-                                                             <option value="1">1 Draft</option>
-                                                             <option value="2">2 Drafts</option>
-                                                             <option value="3">3 Drafts</option>
-                                                         </select>
                                                      </div>
                                                  </div>
 

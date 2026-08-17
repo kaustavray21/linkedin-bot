@@ -6,7 +6,6 @@ from app.api.media import router as media_router
 from app.api.posts import router as posts_router
 from app.api.profile import router as profile_router
 from app.api.scheduler import router as scheduler_router
-from app.api.reference import router as reference_router
 
 __all__ = [
     "auth_router",
@@ -17,6 +16,5 @@ __all__ = [
     "posts_router",
     "profile_router",
     "scheduler_router",
-    "reference_router",
 ]
 

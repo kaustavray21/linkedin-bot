@@ -1,9 +1,135 @@
 # Plan — Parallel Discovery, Discovery-Driven Generation & a Self-Healing Feedback Loop
 
-Date: 2026-08-17 (rev 5 — 10 defects solved or fail-safed, concurrency fixes verified; see §5a)
+Date: 2026-08-17 (rev 6 — S0, P0 and P1 executed)
 Branch: `jul-9-contentGeneration-fix-branch`
-Status: **DRAFT — awaiting your go-ahead to implement.**
+Status: **IN PROGRESS — S0 ✅ · P0 ✅ · P1 ✅ · P2 ✅ · S1 and P3–P7 outstanding**
+
+## EXECUTION LOG — P2 (2026-08-17)
+
+**156 tests pass** (141 before, +15). Verified in headless Chrome as well as by test.
+
+| Ask | Delivered |
+|---|---|
+| ⑯ 25–30 per search | Cap raised 25 → 30; the client now asks for 30, not 10 |
+| ⑰ Pagination, ≥7/page | Client-side, 7/page. A search is one small response, so paging slices rather than re-requests |
+| ⑱ Hashtag search bar | Own input. `normalise_hashtags` accepts `#ai`, `ai`, comma- or space-separated, and dedupes case-insensitively |
+| ⑧ Recency reach | `timelimit` (d/w/m/y) on the search, defaulting to **past month**. Verified against `ddgs.DDGS._search_sync`'s real signature, not assumed |
+| ⑮ Loading animation | Sweeping skeleton cards while a search runs |
+| ⑭ Image, text, author URL | Thumbnail + linked author name + headline on every card |
+| ⑬ Button | `btn-sm`, left-aligned, "Find & draft" |
+
+**Two things worth recording.**
+
+*`author_profile_url` was stored but never serialised.* The column has always been populated by the parser; `DiscoveredPostResponse` simply never carried it, so a card could not link to the author despite the app holding the URL. Found by checking rather than by symptom.
+
+*The hashtag query design.* Tags are searched as **their own angle**, not appended to every query. A post tagged `#BuildInPublic` often does not repeat the topic words in its body, so folding the tag in would have narrowed results while looking like it widened them. Tags are also capped at 3 — every extra tag is two more live search requests.
+
+*Schema:* migration `b7e2d41c8a55` adds `hashtags` and `timelimit` to `discovery_jobs`. Necessary because `POST /discovery/search` only queues; a background task re-reads the row, so anything not persisted is silently dropped between queueing and running — the search would have quietly ignored what you asked for.
+
+*Breakage handled:* widening the `DiscoveryProvider` protocol broke every test double at once (15 failures). Doubles now take `**_options`, so the next option added does not repeat that.
+
+**Verified visually:** 7 cards on page 1, pager reading `1–7 of 16`, thumbnails and author links present, and measured-vs-inferred still displayed honestly (`412 reactions · 37 comments` versus `ranked by relevance`).
 Source: `prompt.md` (2026-08-17) + your revisions
+
+---
+
+## EXECUTION LOG (2026-08-17)
+
+**130 tests pass** (123 before, +7 new concurrency tests). Nothing committed.
+
+### S0 — own-post analytics spike ✅ **My hypothesis was wrong, in your favour**
+
+Impressions for personal member posts **are** available. I had guessed they were
+organisation-only; the docs say otherwise.
+
+| | |
+|---|---|
+| Endpoint | `GET /rest/memberCreatorPostAnalytics` (`q=entity` per post, `q=me` aggregated) |
+| Permission | **`r_member_postAnalytics`** — not restricted |
+| Metrics | IMPRESSION, MEMBERS_REACHED, REACTION, COMMENT, RESHARE, POST_SAVE, LINK_CLICKS, FOLLOWER_GAINED_FROM_CONTENT, … |
+| Aggregation | `TOTAL` or `DAILY` + `dateRange` — a real time series, which is what `post_metrics` wanted |
+
+So **㉒ is buildable, and ㉓'s "my stats" half is unblocked.** We do *not* need
+`socialMetadata`, whose `r_member_social_feed` is documented **Restricted —
+"granted to select developers only."** Design against the analytics API instead.
+
+Written up with endpoint, URN encoding and version caveats at
+`~/.anvideck/projects/linkedin-bot/ref/GROUND_TRUTH_LINKEDIN_MEMBER_ANALYTICS.md`.
+
+**⚠ Incidental finding, unrelated to this work but live:** `linkedin_service.py:21`
+pins `LINKEDIN_VERSION = "202503"`. The docs state Marketing 202507 has been
+**sunset**, and supported monikers run 2025-08 → 2026-07. **The existing publish
+path is on an unsupported API version.** Not caused by anything here; worth
+fixing before it stops working.
+
+### P0 — reference subsystem deleted ✅
+
+26 files removed (22 reference texts, loader, API, schemas, its test). Two tables
+dropped via migration `a1c4f7b93d20`. `generate_styled_post`, `_load_posts` and
+`POST /generate/styled-post` gone; frontend picker, style panel and 4 API methods
+gone.
+
+Two deliberate deviations from the plan:
+
+- **`select_representative` kept.** The plan said delete it. It is a pure
+  function over `list[str]` with its own tests and no reference coupling — the
+  blend-picking logic is reusable when P4 lets you select several exemplars.
+- **`test_generation.py` rewritten, not deleted.** Its three tests went through
+  the deleted endpoint, but two assertions — that `hook_style` and `word_type`
+  actually reach the prompt — were covered *nowhere else*. Moved down to
+  `build_prompt`, where they belonged.
+
+Also removed as newly-dishonest: the **Word Count** select (`generate_with_layout`
+has ignored `num_words` since the skeleton rewrite) and the **Variations** select
+(only the deleted styled path consumed it). A control that does nothing is worse
+than no control.
+
+The app stays working between P0 and P4: Generate Draft falls back to the plain
+`/generate/text` path, which never depended on references.
+
+### P1 — parallel fetch engine ✅
+
+Ported from the profiled prototype. Producer/consumer in `run_discovery`: fetch
+workers touch the network and never `db`; one writer owns the session. Wave
+dispatch bounds early-stop overshoot. Savepoint per row absorbs duplicate URLs.
+
+**A second real bug, caught by the tests rather than review:**
+
+```
+5.67s for 12 fetches at 0.10s latency — serial would be 1.20s
+```
+
+Five times *slower* than serial. `TokenBucket` captured `rate` in `__init__`, and
+the fetcher is a module-level singleton — so the rate was pinned at import and
+`discovery_requests_per_second` was **a dead knob**. That directly contradicts
+this plan's own safety story ("the first move is lowering the rate, not touching
+code"). Rate, burst and concurrency now read from settings on every use.
+
+New tests, `tests/test_fetcher_concurrency.py` — each covers a case that passes a
+smoke test and fails under load:
+
+| Test | Guards |
+|---|---|
+| `test_parallel_run_persists_every_post` | A1 — the session bug this restructure exists for |
+| `test_daily_cap_holds_under_concurrency` | cap of 5, 20 candidates → exactly 5 requests |
+| `test_block_halts_the_wave` | block at 3 of 30 → ≤12 sent, job marked `partial` |
+| `test_stop_after_usable_overshoot_is_bounded` | A3 — overshoot ≤ worker count, not the wave |
+| `test_duplicate_url_does_not_abort_the_run` | A2 — 9 sent, 6 unique stored |
+| `test_rate_ceiling_is_respected` | the burst bug |
+| `test_parallel_is_actually_faster_than_serial` | stops a future change quietly re-serialising |
+
+Retention changed 90 → 30 (defect A4's backfill migration still belongs to P5).
+
+### Follow-ups for you
+
+1. **`.env.example` is stale** — it documents `DISCOVERY_MIN_INTERVAL_SECONDS=30`
+   and `DISCOVERY_DAILY_FETCH_CAP=40`. The file is behind a permission guard I
+   cannot write to. New keys: `DISCOVERY_REQUESTS_PER_SECOND`,
+   `DISCOVERY_CONCURRENCY`, `DISCOVERY_CONCURRENCY_MAX`, `DISCOVERY_ADAPTIVE`,
+   `DISCOVERY_RAMP_AFTER`, `DISCOVERY_TOKEN_BURST`.
+2. **The pinned LinkedIn API version** (S0's incidental finding).
+3. **Nothing is committed** — the working tree holds P0 + P1 and the earlier
+   create-post work.
 
 ---
 
