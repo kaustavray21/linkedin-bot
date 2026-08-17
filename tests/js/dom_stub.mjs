@@ -73,11 +73,15 @@ class FakeEl {
 }
 
 const registry = new Map();
+const resolvers = new Map();
 
 const doc = {
     title: 'test',
     readyState: 'complete',
+    visibilityState: 'visible',
+    _listeners: {},
     query(key) {
+        if (resolvers.has(key)) return resolvers.get(key)();
         if (!registry.has(key)) registry.set(key, new FakeEl(key));
         return registry.get(key);
     },
@@ -86,8 +90,35 @@ const doc = {
     querySelectorAll() { return []; },
     createElement(tag) { return new FakeEl(`<${tag}>`); },
     createTextNode(text) { return { text, renderedText: text }; },
-    addEventListener() {},
+    addEventListener(type, fn) { (doc._listeners[type] ||= []).push(fn); },
 };
+
+/**
+ * A radio group. Needed because the app reads the selection through a
+ * `:checked` selector and writes it through a `[value="..."]` selector — two
+ * different query strings that the flat element registry would hand back as
+ * two unrelated elements, quietly breaking every schedule assertion.
+ */
+export function radioGroup(name, values, initial = values[0]) {
+    const els = values.map((value) => {
+        const el = new FakeEl(`input[name="${name}"][value="${value}"]`);
+        el.value = value;
+        el.checked = value === initial;
+        // Radios are exclusive: checking one unchecks the rest.
+        Object.defineProperty(el, 'checked', {
+            get: () => el._checked,
+            set: (on) => {
+                el._checked = Boolean(on);
+                if (on) els.forEach(other => { if (other !== el) other._checked = false; });
+            },
+        });
+        el._checked = value === initial;
+        registry.set(el.key, el);
+        return el;
+    });
+    resolvers.set(`input[name="${name}"]:checked`, () => els.find(e => e.checked) || null);
+    return els;
+}
 
 /**
  * A stand-in for <hashtag-editor>. app.js reaches it through a getter over
@@ -109,9 +140,74 @@ export function hashtagEditorStub() {
  * `components` pre-registers richer stubs by selector, e.g.
  *   { '#hashtag-editor': hashtagEditorStub() }
  */
+/**
+ * <form id="post-creation-form">. A real form.reset() clears every control it
+ * contains; the flat element registry has no tree, so the form is told which
+ * controls are its own. Without this, startNewPost() looks like it cleared the
+ * editor while every field still held its old value — the exact illusion a
+ * state-bleed test exists to catch.
+ *
+ * Mirrors the controls inside #post-creation-form in index.html.
+ */
+const POST_FORM_CONTROLS = [
+    '#post-text-content', '#ai-text-prompt', '#create-notes-input', '#create-para-count',
+    '#create-hook-style', '#create-rhythm', '#create-word-type', '#post-scheduled-time',
+    '#generated-image-url',
+];
+
+export function postFormStub() {
+    const el = new FakeEl('#post-creation-form');
+    el.reset = () => {
+        POST_FORM_CONTROLS.forEach(key => { doc.query(key).value = ''; });
+        // reset() restores defaults, and the default schedule is "now".
+        const now = registry.get('input[name="post-schedule-type"][value="now"]');
+        if (now) now.checked = true;
+    };
+    return el;
+}
+
+/** <create-sections> — app.js only ever calls .show() and reads .active. */
+export function createSectionsStub() {
+    const el = new FakeEl('create-sections');
+    el.active = 'ai';
+    el.show = (name) => { el.active = name; };
+    return el;
+}
+
+/** <refine-box> — the session-only undo/recent state that must round-trip. */
+export function refineBoxStub() {
+    const el = new FakeEl('refine-box');
+    el.history = [];
+    el.recent = [];
+    el.renderChips = () => {};
+    return el;
+}
+
+/**
+ * The component set a draft-editor test needs. Call before bootApp and pass
+ * the result as `components`; radio groups register themselves.
+ */
+export function editorComponents() {
+    return {
+        '#post-creation-form': postFormStub(),
+        '#hashtag-editor': hashtagEditorStub(),
+        'create-sections': createSectionsStub(),
+        'refine-box': refineBoxStub(),
+    };
+}
+
 export function bootApp(appJsPath, api = {}, components = {}) {
     registry.clear();
+    resolvers.clear();
+    doc._listeners = {};
+    doc.visibilityState = 'visible';
     for (const [key, el] of Object.entries(components)) registry.set(key, el);
+    // Registered before app.js runs: setupEventListeners() takes a baseline
+    // serialize(), and a schedule radio that appears afterwards would make that
+    // baseline disagree with every later read.
+    radioGroup('post-schedule-type', ['now', 'later'], 'now');
+
+    const windowListeners = {};
 
     const storage = new Map();
     const sandbox = {
@@ -143,6 +239,8 @@ export function bootApp(appJsPath, api = {}, components = {}) {
             removeItem: (k) => storage.delete(k),
         },
     };
+    sandbox.addEventListener = (type, fn) => { (windowListeners[type] ||= []).push(fn); };
+    sandbox.removeEventListener = () => {};
     sandbox.window = sandbox;
     sandbox.globalThis = sandbox;
     sandbox.location = { search: '', pathname: '/', href: '' };
@@ -158,7 +256,15 @@ export function bootApp(appJsPath, api = {}, components = {}) {
         app: sandbox.window.app,
         el: (id) => doc.getElementById(id),
         sel: (s) => doc.querySelector(s),
+        doc,
         storage,
+        /** Dispatch a window- or document-level event, e.g. 'pagehide'. */
+        fire(type, event = {}) {
+            const payload = { type, preventDefault() { this.defaultPrevented = true; }, ...event };
+            [...(windowListeners[type] || []), ...(doc._listeners[type] || [])]
+                .forEach(fn => fn(payload));
+            return payload;
+        },
     };
 }
 

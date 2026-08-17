@@ -87,6 +87,28 @@ const API = {
         });
     },
 
+    // A save that survives the page closing.
+    //
+    // `keepalive` is the whole point: a normal fetch is cancelled the moment
+    // the document goes away, so the ordinary save path cannot be reused here.
+    // The 64KB keepalive body cap is nowhere near a 3000-character post.
+    //
+    // Fire-and-forget on purpose — there is no page left to show an error on,
+    // and awaiting it would block the unload the browser is already doing.
+    // Deliberately not this.request(): that wrapper awaits and re-throws.
+    saveDraftOnUnload(postId, fields) {
+        const userId = this.getUserId();
+        const query = userId ? `?user_id=${userId}` : '';
+        const url = postId ? `/posts/${postId}${query}` : `/posts/${query}`;
+
+        return fetch(url, {
+            method: postId ? 'PUT' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fields),
+            keepalive: true,
+        });
+    },
+
     async generateHashtags({ text = null, exemplarId = null, topic = '', count = null }) {
         return this.request('/generate/hashtags', {
             method: 'POST',

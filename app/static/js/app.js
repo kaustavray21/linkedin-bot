@@ -99,6 +99,12 @@ class App {
 
     // 2. TABS & NAVIGATION
     switchTab(tabName) {
+        // Leaving the editor saves it, before currentTab moves — the same one
+        // whole-post PUT as every other save path, so a draft is never half of
+        // one edit and half of another. Not awaited: navigation should not wait
+        // on the network, and the on-close handler is the backstop if it fails.
+        if (this.currentTab === 'create' && tabName !== 'create') this.autosaveIfDirty();
+
         this.currentTab = tabName;
         
         // Update sidebar active state
@@ -490,6 +496,17 @@ class App {
         editor.classList.toggle('hidden', stage === 'writing');
     }
 
+    // The one place the exemplar is set. It is three linked facts — the id the
+    // similarity gate and the reference-hashtag path need, and the url/author
+    // the reader needs — so they move together or they drift apart.
+    setExemplar(id, url = null, author = null) {
+        this.exemplarId = id || null;
+        this.exemplarUrl = this.exemplarId ? (url || null) : null;
+        this.exemplarAuthor = this.exemplarId ? (author || null) : null;
+        if (this.hashtagEditor) this.hashtagEditor.setExemplar(this.exemplarId);
+        this.showExemplarAttribution(this.exemplarUrl, this.exemplarAuthor);
+    }
+
     // Where a remixed draft came from. Shown as plain text when there is no
     // URL, so a missing link degrades to a name rather than a dead anchor.
     showExemplarAttribution(url, author) {
@@ -564,9 +581,7 @@ class App {
         // Retained from a remix: the similarity gate needs the source post to
         // compare against on every refine, and the reference-hashtag path needs
         // its tags. Clearing it here would silently disable both.
-        this.exemplarId = result.exemplar_id || null;
-        if (this.hashtagEditor) this.hashtagEditor.setExemplar(this.exemplarId);
-        this.showExemplarAttribution(result.exemplar_url, result.exemplar_author);
+        this.setExemplar(result.exemplar_id, result.exemplar_url, result.exemplar_author);
 
         // A remix is a new post, not an edit of a saved one.
         this.draftId = null;
@@ -959,7 +974,28 @@ class App {
         sidebarToggle.addEventListener('click', () => this.toggleSidebar());
         if (localStorage.getItem('sidebar_collapsed') === '1') this.toggleSidebar(true);
 
+        // Closing the page. pagehide is the one that fires reliably on mobile
+        // and on bfcache eviction; visibilitychange catches the tab being
+        // backgrounded before the OS kills it. Both go through the same
+        // keepalive save, which is idempotent because it writes the whole post.
+        window.addEventListener('pagehide', () => this.saveOnUnload());
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') this.saveOnUnload();
+        });
+        // The backstop, not the protection. The browser shows its own wording
+        // and ignores anything we supply, so this only buys a second chance
+        // when the keepalive save above did not get through.
+        window.addEventListener('beforeunload', (event) => {
+            if (!this.isDirty() || !this.composeFullText().trim()) return;
+            event.preventDefault();
+            event.returnValue = '';
+        });
+
         this.refreshRail();
+        // Baseline before the timer starts, or the first tick sees an untouched
+        // form as dirty and writes an empty draft.
+        this.markSaved();
+        this.startAutosave();
     }
 
     /**
@@ -1046,12 +1082,8 @@ class App {
 
     startNewPost() {
         this.draftId = null;
-        this.exemplarId = null;
-        if (this.hashtagEditor) {
-            this.hashtagEditor.set([]);
-            this.hashtagEditor.setExemplar(null);
-        }
-        this.showExemplarAttribution(null, null);
+        if (this.hashtagEditor) this.hashtagEditor.set([]);
+        this.setExemplar(null);
         // A previous handoff that failed mid-stage would otherwise leave the
         // textarea hidden behind its skeleton.
         this.setDraftStage(null);
@@ -1063,6 +1095,7 @@ class App {
         this.showEditor(true);
         this.showSection('ai');
         this.refreshRail();
+        this.markSaved();
         const library = document.querySelector('draft-library');
         if (library && library.setActive) library.setActive(null);
     }
@@ -1074,15 +1107,11 @@ class App {
 
             const { body, tags } = this.decomposeFullText(post.content || '');
             this.applyBody(body);
-            if (this.hashtagEditor) {
-                this.hashtagEditor.set(tags);
-                // A stored draft carries no exemplar yet (that arrives with
-                // draft_lineage), so the reference path degrades visibly rather
-                // than silently doing nothing.
-                this.exemplarId = null;
-                this.hashtagEditor.setExemplar(null);
-            }
-            this.showExemplarAttribution(null, null);
+            if (this.hashtagEditor) this.hashtagEditor.set(tags);
+            // A stored draft carries no exemplar yet (that arrives with
+            // draft_lineage), so the reference path degrades visibly rather
+            // than silently doing nothing.
+            this.setExemplar(null);
             this.setDraftStage(null);
 
             if (post.image_url) this.applyImage(post.image_url);
@@ -1107,11 +1136,163 @@ class App {
             this.showEditor(true);
             this.showSection('body');
             this.refreshRail();
+            this.markSaved();
             const library = document.querySelector('draft-library');
             if (library && library.setActive) library.setActive(post.id);
         } catch (error) {
             this.showToast(error.message || 'Could not open that draft.', 'error');
         }
+    }
+
+    // ------------------------------------------------------- DRAFT STATE --
+    //
+    // serialize() and hydrate() are exact inverses over the WHOLE editor, and
+    // a round-trip test holds them to it. Two things depend on that:
+    //
+    //   - dirty is computed, not guessed: serialize() !== lastSaved. A field
+    //     missing from serialize() is a field whose edits never mark the draft
+    //     dirty, so the autosave silently skips them.
+    //   - R5 (multiple open drafts) swaps documents by hydrating one and
+    //     serializing the other. Anything absent here bleeds between tabs.
+    //
+    // Key order is fixed because the comparison is on the JSON string.
+
+    get AUTOSAVE_INTERVAL_MS() { return 5 * 60 * 1000; }
+
+    serialize() {
+        const value = (id) => document.getElementById(id).value;
+        const checked = document.querySelector('input[name="post-schedule-type"]:checked');
+        const sections = document.querySelector('create-sections');
+        const refine = document.querySelector('refine-box');
+
+        return {
+            draftId: this.draftId ?? null,
+            body: value('post-text-content'),
+            tags: [...this.tags],
+            imageUrl: value('generated-image-url'),
+            scheduleType: checked ? checked.value : 'now',
+            scheduledLocal: value('post-scheduled-time'),
+            topic: value('ai-text-prompt'),
+            notes: value('create-notes-input'),
+            paraCount: value('create-para-count'),
+            hookStyle: value('create-hook-style'),
+            rhythm: value('create-rhythm'),
+            wordType: value('create-word-type'),
+            exemplarId: this.exemplarId ?? null,
+            exemplarUrl: this.exemplarUrl ?? null,
+            exemplarAuthor: this.exemplarAuthor ?? null,
+            section: (sections && sections.active) || 'ai',
+            refineHistory: refine && refine.history ? [...refine.history] : [],
+            refineRecent: refine && refine.recent ? [...refine.recent] : [],
+        };
+    }
+
+    hydrate(state) {
+        const set = (id, v) => { document.getElementById(id).value = v ?? ''; };
+
+        this.draftId = state.draftId ?? null;
+        set('post-text-content', state.body);
+        if (this.hashtagEditor) this.hashtagEditor.set(state.tags || []);
+
+        if (state.imageUrl) this.applyImage(state.imageUrl);
+        else this.clearGeneratedImage();
+
+        // The radio drives whether the datetime panel is visible and what the
+        // submit button says, and only its change handler knows that — so the
+        // event is dispatched rather than the panel being toggled here.
+        const radio = document.querySelector(
+            `input[name="post-schedule-type"][value="${state.scheduleType || 'now'}"]`
+        );
+        if (radio) {
+            radio.checked = true;
+            radio.dispatchEvent(new Event('change'));
+        }
+        set('post-scheduled-time', state.scheduledLocal);
+
+        set('ai-text-prompt', state.topic);
+        set('create-notes-input', state.notes);
+        set('create-para-count', state.paraCount);
+        set('create-hook-style', state.hookStyle);
+        set('create-rhythm', state.rhythm);
+        set('create-word-type', state.wordType);
+
+        this.setExemplar(state.exemplarId, state.exemplarUrl, state.exemplarAuthor);
+
+        const refine = document.querySelector('refine-box');
+        if (refine && refine.renderChips) {
+            refine.history = [...(state.refineHistory || [])];
+            refine.recent = [...(state.refineRecent || [])];
+            refine.renderChips();
+        }
+
+        this.showSection(state.section || 'ai');
+        // The counter and the rail are derived, not stored — recompute rather
+        // than restore, so they can never disagree with the fields.
+        document.getElementById('post-text-content').dispatchEvent(new Event('input'));
+        this.refreshRail();
+    }
+
+    // The baseline every dirty check is measured against. Called after any
+    // successful write and after loading a document — never on a timer.
+    markSaved() {
+        this.lastSaved = JSON.stringify(this.serialize());
+    }
+
+    isDirty() {
+        return JSON.stringify(this.serialize()) !== this.lastSaved;
+    }
+
+    // Saves only if there is both a change and something to save. The empty
+    // check is not defensive padding: PostCreate.content has min_length=1
+    // (schemas/post.py:8), so an empty save is a 422, not a no-op.
+    async autosaveIfDirty() {
+        if (!this.isDirty()) return null;
+        if (!this.composeFullText().trim()) return null;
+        return this.saveDraft();
+    }
+
+    // Fires every interval, not once per keystroke. The dirty gate is what
+    // makes that cheap: reading a draft for an hour costs zero requests.
+    startAutosave() {
+        if (this.autosaveTimer) return;
+        this.autosaveTimer = setInterval(() => {
+            if (this.currentTab !== 'create') return;
+            this.autosaveIfDirty();
+        }, this.AUTOSAVE_INTERVAL_MS);
+        // Node's timers keep the process alive; the browser's do not. Guarded
+        // so the test harness can exit.
+        if (this.autosaveTimer && typeof this.autosaveTimer.unref === 'function') {
+            this.autosaveTimer.unref();
+        }
+    }
+
+    /**
+     * The save that runs as the page goes away.
+     *
+     * A custom "save before you go?" dialog is not possible — beforeunload
+     * only lets a page request the browser's own wording. Saving is both
+     * possible and the better outcome, so that is what this does; the browser
+     * confirm is kept as a backstop for when this request fails.
+     *
+     * A draft that was never saved gets a POST rather than a PUT: losing typed
+     * work to a stray Cmd-W is worse than an extra row.
+     */
+    saveOnUnload() {
+        if (!this.isDirty()) return false;
+
+        const content = this.composeFullText().trim();
+        if (!content) return false;
+
+        const state = this.getPostState();
+        const fields = {
+            content,
+            image_url: state.imageUrl || null,
+            scheduled_time: state.scheduledUtc,
+        };
+        if (!this.draftId) fields.exemplar_id = this.exemplarId;
+
+        API.saveDraftOnUnload(this.draftId, fields);
+        return true;
     }
 
     async saveDraft({ explicit = false } = {}) {
@@ -1136,6 +1317,7 @@ class App {
                 : await API.createPost(fields.content, fields.image_url, fields.scheduled_time, this.exemplarId);
 
             this.draftId = saved.id;
+            this.markSaved();
             await this.loadDrafts();
             if (explicit) this.showToast('Draft saved.', 'success');
             return saved;
@@ -1160,8 +1342,8 @@ class App {
             await API.deletePost(id);
             if (this.draftId === id) {
                 this.draftId = null;
-                this.exemplarId = null;
-                this.showExemplarAttribution(null, null);
+                this.setExemplar(null);
+                this.markSaved();
                 this.showEditor(false);
             }
             await this.loadDrafts();
@@ -1425,8 +1607,10 @@ class App {
             document.getElementById('datetime-picker-container').classList.add('hidden');
             document.getElementById('btn-submit-text').textContent = 'Review & Publish';
             this.draftId = null;
-            this.exemplarId = null;
-            this.showExemplarAttribution(null, null);
+            this.setExemplar(null);
+            // Published: the editor is empty and clean, so nothing here is
+            // dirty and no autosave or on-close save should fire.
+            this.markSaved();
             this.showEditor(false);
             this.showSection('ai');
             this.refreshRail();
