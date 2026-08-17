@@ -1,0 +1,107 @@
+# =============================================================================
+# linkedin-bot — example environment
+#
+# Every key below mirrors a field on Settings in app/core/config.py, with that
+# field's real default. Anything omitted here falls back to the same default,
+# so an empty .env is a working .env for everything except credentials.
+#
+# Copy to .env and fill in the credential blocks.
+# =============================================================================
+
+# --- MySQL -------------------------------------------------------------------
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DATABASE=linkedin_bot
+MYSQL_USER=root
+MYSQL_PASSWORD=
+
+# --- LinkedIn OAuth ----------------------------------------------------------
+CLIENT_ID=
+CLIENT_SECRET=
+REDIRECT_URI=http://localhost:8000/auth/callback
+APP_URL=http://localhost:8000
+
+# --- LinkedIn API ------------------------------------------------------------
+# NOTE: the versioned REST moniker is NOT read from here — it is pinned in
+# app/services/linkedin_service.py. Check that pin against the currently
+# supported range before relying on the publish path.
+LINKEDIN_API_BASE=https://api.linkedin.com/v2
+LINKEDIN_AUTH_URL=https://www.linkedin.com/oauth/v2/authorization
+LINKEDIN_TOKEN_URL=https://www.linkedin.com/oauth/v2/accessToken
+
+# --- AI: text ----------------------------------------------------------------
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-3.5-flash
+GEMINI_IMAGE_MODEL=gemini-2.5-flash-image
+OPENAI_API_KEY=
+
+# --- AI: images (fal.ai, with a Pollinations fallback) ------------------------
+FAL_API_KEY=
+FAL_IMAGE_MODEL=fal-ai/nano-banana-2
+
+# --- Media input limits ------------------------------------------------------
+MAX_UPLOAD_BYTES=8388608
+MEDIA_FETCH_TIMEOUT=10
+UPLOADS_DIR=app/static/uploads
+
+# --- Style fidelity: the similarity gate -------------------------------------
+# Tune against real output; scripts/tune_similarity.py prints the distribution.
+SIMILARITY_JACCARD_MAX=0.25
+SIMILARITY_MAX_WORD_RUN=8
+SIMILARITY_MAX_RETRIES=2
+
+# --- Discovery: which search provider finds candidate post URLs ---------------
+DISCOVERY_PROVIDER=ddg              # ddg | searxng | manual
+SEARXNG_URL=http://localhost:8080
+
+# --- Discovery: how the post pages are actually fetched -----------------------
+DISCOVERY_EGRESS=direct             # direct | jina | proxy
+DISCOVERY_EGRESS_FALLBACK=direct
+DISCOVERY_PROXY_URL=
+JINA_READER_BASE=https://r.jina.ai
+
+# --- Discovery: throttles ----------------------------------------------------
+# Requests per second is THE safety knob. Worker count follows from rate x
+# latency rather than being chosen independently: at these rates 3 workers is
+# the knee — 6 and 12 measured exactly as fast and only sent more requests
+# after a block. If you start getting blocked, lower the rate; do not raise
+# concurrency expecting it to help.
+DISCOVERY_REQUESTS_PER_SECOND=2.0
+DISCOVERY_CONCURRENCY=3
+DISCOVERY_CONCURRENCY_MAX=6         # ceiling for the adaptive ramp
+DISCOVERY_ADAPTIVE=true
+DISCOVERY_RAMP_AFTER=5              # consecutive successes per ramp step
+
+# Burst of 1 on purpose: a token bucket that starts full fires `rate` requests
+# simultaneously on its first tick. Measured against an 8/s cap — 10.72/s
+# observed with a full bucket, 7.93/s with a burst of 1.
+DISCOVERY_TOKEN_BURST=1.0
+
+# Optional extra floor between requests. 0 means the token bucket alone paces;
+# kept as an escape hatch back to serial-ish behaviour with no code change.
+DISCOVERY_MIN_INTERVAL_SECONDS=0.0
+DISCOVERY_JITTER_SECONDS=0.0
+
+# A backstop, not a pacer — the token bucket does the pacing.
+DISCOVERY_DAILY_FETCH_CAP=300
+DISCOVERY_CIRCUIT_THRESHOLD=3
+DISCOVERY_CIRCUIT_COOLDOWN_HOURS=24
+DISCOVERY_FETCH_TIMEOUT=20
+
+# --- Discovery: retention ----------------------------------------------------
+# expires_at is computed at INSERT, so changing this only affects new rows.
+# Existing rows need a backfill (see migration c93a1f60d4e7).
+DISCOVERY_RETENTION_DAYS=30
+
+# --- Ranking weights (hybrid engagement score) -------------------------------
+RANK_W_REACTIONS=1.0
+RANK_W_COMMENTS=1.5
+RANK_W_REPOSTS=2.0
+RANK_W_SERP=3.0
+RANK_W_RECENCY=2.0
+RANK_W_OVERLAP=1.0
+
+# --- App ---------------------------------------------------------------------
+LOG_LEVEL=INFO
+DEBUG=false
+SESSION_SECRET=change-me-in-production
