@@ -20,3 +20,4 @@ import './confirm-modal.js';
 import './draft-library.js';
 import './hashtag-editor.js';
 import './refine-box.js';
+import './schedule-calendar.js';

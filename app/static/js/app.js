@@ -857,6 +857,28 @@ class App {
         this.refreshRail();
     }
 
+    /**
+     * A viewable URL for a published post, or null.
+     *
+     * `linkedin_post_id` is whatever the `x-restli-id` header returned on
+     * publish (`linkedin_service.py:70`) — no test has ever asserted its shape
+     * and nothing has built a URL from it before. So this validates rather than
+     * assumes: an unrecognised value renders NO link instead of one that 404s.
+     * S0's follow-up is to confirm the real format against a live publish.
+     */
+    linkedInPermalink(post) {
+        const id = (post.linkedin_post_id || '').trim();
+        if (!id) return null;
+
+        // urn:li:share:123 / urn:li:ugcPost:123 / urn:li:activity:123
+        if (/^urn:li:(share|ugcPost|activity):\d+$/.test(id)) {
+            return `https://www.linkedin.com/feed/update/${encodeURIComponent(id)}/`;
+        }
+        // A bare numeric id has no type, and the three URN kinds take different
+        // paths — guessing one would produce a plausible dead link.
+        return null;
+    }
+
     // ------------------------------------------------------------- DRAFTS --
 
     toggleSidebar(force = null) {
@@ -1330,6 +1352,9 @@ class App {
             document.getElementById('stat-scheduled-count').textContent = scheduled;
             document.getElementById('stat-failed-count').textContent = failed;
 
+            const calendar = document.querySelector('schedule-calendar');
+            if (calendar && calendar.setPosts) calendar.setPosts(posts);
+
             // Load upcoming posts list
             const upcomingList = document.getElementById('upcoming-posts-list');
             upcomingList.innerHTML = '';
@@ -1406,7 +1431,14 @@ class App {
                 // Badges
                 let statusBadge = '';
                 if (post.status === 'published') {
-                    statusBadge = `<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> Published</span>`;
+                    const link = this.linkedInPermalink(post);
+                    statusBadge = link
+                        ? `<a href="${link}" target="_blank" rel="noopener noreferrer"
+                              class="badge badge-success" title="View on LinkedIn">
+                               <i class="fa-solid fa-circle-check"></i> Published
+                               <i class="fa-solid fa-arrow-up-right-from-square"></i></a>`
+                        : `<span class="badge badge-success" title="No viewable link was returned on publish">`
+                          + `<i class="fa-solid fa-circle-check"></i> Published</span>`;
                 } else if (post.status === 'scheduled') {
                     statusBadge = `<span class="badge badge-info"><i class="fa-solid fa-clock"></i> Scheduled</span>`;
                 } else if (post.status === 'failed') {
