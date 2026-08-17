@@ -294,6 +294,8 @@ class App {
         }
 
         this.switchTab('create');
+        // Land on the body section — that is where the draft just arrived.
+        this.showSection('body');
 
         const band = result.similarity_band || 'unknown';
         const overlap = result.similarity_jaccard !== null
@@ -305,12 +307,6 @@ class App {
         );
 
         (result.notes || []).forEach(note => this.showToast(note, 'info'));
-    }
-
-    escapeHtml(value) {
-        const div = document.createElement('div');
-        div.textContent = value == null ? '' : String(value);
-        return div.innerHTML;
     }
 
     // 3. LISTENERS
@@ -347,6 +343,7 @@ class App {
             } else {
                 charCounter.style.color = 'var(--text-secondary)';
             }
+            this.refreshRail();
         });
 
         // Image source tabs — AI / Upload / URL.
@@ -485,6 +482,7 @@ class App {
         // Profile select change listener
         document.getElementById('create-profile-select').addEventListener('change', (e) => {
             this.loadCreatorStyleProfile(e.target.value);
+            this.refreshRail();
         });
 
         // Generate AI Image
@@ -543,14 +541,21 @@ class App {
                 const picker = document.getElementById('datetime-picker-container');
                 const submitText = document.getElementById('btn-submit-text');
                 
+                // "Review &" prefix stays honest: the button now opens the
+                // preview rather than publishing straight away.
                 if (e.target.value === 'later') {
                     picker.classList.remove('hidden');
-                    submitText.textContent = 'Schedule Publication';
+                    submitText.textContent = 'Review & Schedule';
                 } else {
                     picker.classList.add('hidden');
-                    submitText.textContent = 'Publish Immediately';
+                    submitText.textContent = 'Review & Publish';
                 }
+                this.refreshRail();
             });
+        });
+
+        document.getElementById('post-scheduled-time').addEventListener('change', () => {
+            this.refreshRail();
         });
 
         // Post creation Form Submit
@@ -627,12 +632,76 @@ class App {
             this.loadHistory();
             this.showToast('Refreshed history', 'success');
         });
+
+        // Create-post components. They render state; this class still owns it.
+        // <create-sections> keeps the rail's highlight in sync itself — it has
+        // to, because its first show() runs before this listener could exist.
+        const workspace = document.querySelector('create-sections');
+        if (workspace) {
+            workspace.addEventListener('request-publish', () => this.handlePostSubmit());
+        }
+        this.refreshRail();
+    }
+
+    // Everything the rail shows and the publish preview reads, in one place —
+    // so the two can never describe the post differently.
+    getPostState() {
+        const content = document.getElementById('post-text-content').value;
+        const checked = document.querySelector('input[name="post-schedule-type"]:checked');
+        const scheduleType = checked ? checked.value : 'now';
+        const scheduledLocal = document.getElementById('post-scheduled-time').value;
+
+        let scheduledUtc = null;
+        let scheduledLabel = '';
+        let scheduledUtcLabel = '';
+        let scheduledInPast = false;
+
+        if (scheduleType === 'later' && scheduledLocal) {
+            const when = new Date(scheduledLocal);
+            scheduledUtc = when.toISOString();
+            scheduledLabel = when.toLocaleString(undefined, {
+                weekday: 'short', day: 'numeric', month: 'short',
+                hour: 'numeric', minute: '2-digit',
+            });
+            scheduledUtcLabel = when.toISOString().slice(11, 16);
+            scheduledInPast = when.getTime() < Date.now();
+        }
+
+        return {
+            profileSlug: document.getElementById('create-profile-select').value,
+            selectedRefCount: document.querySelectorAll(
+                '#creator-posts-list input[type="checkbox"]:checked'
+            ).length,
+            topic: document.getElementById('ai-text-prompt').value.trim(),
+            content,
+            charCount: content.length,
+            imageUrl: document.getElementById('generated-image-url').value,
+            scheduleType,
+            scheduledLocal,
+            scheduledUtc,
+            scheduledLabel,
+            scheduledUtcLabel,
+            scheduledInPast,
+        };
+    }
+
+    // Guarded rather than assumed: if the component module fails to load, the
+    // form degrades to its old all-sections-visible behaviour instead of dying.
+    refreshRail() {
+        const rail = document.querySelector('create-rail');
+        if (rail && rail.update) rail.update(this.getPostState());
+    }
+
+    showSection(name) {
+        const workspace = document.querySelector('create-sections');
+        if (workspace && workspace.show) workspace.show(name);
     }
 
     clearGeneratedImage() {
         document.getElementById('generated-image-url').value = '';
         document.getElementById('image-preview').src = '';
         document.getElementById('image-preview-container').classList.add('hidden');
+        this.refreshRail();
     }
 
     // Single place where an image becomes "the post's image", whatever its
@@ -642,6 +711,7 @@ class App {
         document.getElementById('generated-image-url').value = imageUrl;
         document.getElementById('image-preview').src = imageUrl;
         document.getElementById('image-preview-container').classList.remove('hidden');
+        this.refreshRail();
     }
 
     setButtonLoading(btnElement, isLoading) {
@@ -661,19 +731,36 @@ class App {
 
     // 4. DATA LOGIC & ACTIONS
     async handlePostSubmit() {
-        const content = document.getElementById('post-text-content').value.trim();
-        const imageUrl = document.getElementById('generated-image-url').value;
-        const scheduleType = document.querySelector('input[name="post-schedule-type"]:checked').value;
-        
-        let scheduledTime = null;
-        if (scheduleType === 'later') {
-            const timeVal = document.getElementById('post-scheduled-time').value;
-            if (!timeVal) {
-                this.showToast('Please specify a date and time.', 'warning');
-                return;
-            }
-            // Convert local picker date/time into UTC ISO string
-            scheduledTime = new Date(timeVal).toISOString();
+        const post = this.getPostState();
+
+        // Validation lives here rather than on the inputs. The form carries
+        // `novalidate` because a `required` field inside a hidden section makes
+        // the browser refuse to submit while showing the user nothing at all.
+        // Each failure jumps to the section that can fix it.
+        if (!post.content.trim()) {
+            this.showToast('Write or generate the post body first.', 'warning');
+            this.showSection('body');
+            return;
+        }
+        if (post.charCount > 3000) {
+            this.showToast(
+                `That's ${post.charCount} characters — LinkedIn's limit is 3000.`, 'warning'
+            );
+            this.showSection('body');
+            return;
+        }
+        if (post.scheduleType === 'later' && !post.scheduledLocal) {
+            this.showToast('Please specify a date and time.', 'warning');
+            this.showSection('schedule');
+            return;
+        }
+
+        // Last look before anything leaves the browser. Nothing has been sent
+        // at this point, so backing out costs nothing.
+        const modal = document.getElementById('confirm-modal');
+        if (modal && modal.confirmPublish) {
+            const confirmed = await modal.confirmPublish(post, this.user);
+            if (!confirmed) return;
         }
 
         const submitBtn = document.getElementById('btn-submit-post');
@@ -683,12 +770,14 @@ class App {
 
         try {
             // Step A: Save Draft (or Scheduled) in local DB
-            const post = await API.createPost(content, imageUrl, scheduledTime);
-            
+            const created = await API.createPost(
+                post.content.trim(), post.imageUrl, post.scheduledUtc
+            );
+
             // Step B: If publish now, trigger active publishing immediately
-            if (scheduleType === 'now') {
+            if (post.scheduleType === 'now') {
                 this.showToast('Uploading and publishing to LinkedIn...', 'info');
-                await API.publishPost(post.id);
+                await API.publishPost(created.id);
                 this.showToast('Successfully published to LinkedIn!', 'success');
             } else {
                 this.showToast('Post scheduled successfully!', 'success');
@@ -698,7 +787,16 @@ class App {
             document.getElementById('post-creation-form').reset();
             document.getElementById('char-counter').textContent = '0 / 3000';
             this.clearGeneratedImage();
-            
+
+            // reset() only clears inputs. The variations picker, the datetime
+            // panel, the active section and the rail are all JS state, so they
+            // survive a reset and have to be put back by hand.
+            document.getElementById('variations-selector-container').classList.add('hidden');
+            document.getElementById('datetime-picker-container').classList.add('hidden');
+            document.getElementById('btn-submit-text').textContent = 'Review & Publish';
+            this.showSection('ai');
+            this.refreshRail();
+
             // Go to history tab
             this.switchTab('history');
         } catch (error) {
@@ -836,10 +934,24 @@ class App {
         }
     }
 
-    async actionPublishImmediate(postId) {
-        if (!confirm('Are you sure you want to publish this post immediately to LinkedIn?')) {
-            return;
+    // One confirmation style across the app. Falls back to the browser dialog
+    // if the component module is unavailable — losing the gate entirely on a
+    // publish or a delete would be worse than an ugly dialog.
+    async confirmAction({ title, message, confirmLabel, danger = false }) {
+        const modal = document.getElementById('confirm-modal');
+        if (modal && modal.confirm) {
+            return modal.confirm({ title, message, confirmLabel, danger });
         }
+        return window.confirm(message);
+    }
+
+    async actionPublishImmediate(postId) {
+        const proceed = await this.confirmAction({
+            title: 'Publish this post now?',
+            message: 'It will be published to LinkedIn immediately.',
+            confirmLabel: 'Publish now',
+        });
+        if (!proceed) return;
 
         this.showToast('Uploading and publishing to LinkedIn...', 'info');
         try {
@@ -853,9 +965,13 @@ class App {
     }
 
     async actionDelete(postId) {
-        if (!confirm('Are you sure you want to delete this post?')) {
-            return;
-        }
+        const proceed = await this.confirmAction({
+            title: 'Delete this post?',
+            message: 'This removes it from your history. It cannot be undone.',
+            confirmLabel: 'Delete',
+            danger: true,
+        });
+        if (!proceed) return;
 
         try {
             await API.deletePost(postId);
@@ -882,10 +998,13 @@ class App {
         if (type === 'error') icon = '<i class="fa-solid fa-circle-xmark"></i>';
         if (type === 'warning') icon = '<i class="fa-solid fa-triangle-exclamation"></i>';
 
-        toast.innerHTML = `
-            ${icon}
-            <span>${message}</span>
-        `;
+        // The icon is our own markup; the message is not — it is often a server
+        // error string. Set it as text so no markup in it can ever be parsed.
+        toast.innerHTML = icon;
+        const label = document.createElement('span');
+        label.textContent = message;
+        toast.appendChild(label);
+
         container.appendChild(toast);
 
         // Auto remove after 4.5 seconds
@@ -895,14 +1014,16 @@ class App {
         }, 4500);
     }
 
-    // Helper to escape HTML tags
-    escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/&/g, "&amp;")
-                  .replace(/</g, "&lt;")
-                  .replace(/>/g, "&gt;")
-                  .replace(/"/g, "&quot;")
-                  .replace(/'/g, "&#039;");
+    // Helper to escape HTML tags. Coerces first: callers pass ids and counts as
+    // well as strings, and a bare number has no .replace to call.
+    escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        return String(value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     // -------------------------------------------------------- CREATOR PROFILES --
@@ -1029,6 +1150,7 @@ class App {
     }
 
     handleSelectedPostsChange() {
+        this.refreshRail();
         const checkedVals = [];
         document.querySelectorAll('#creator-posts-list input[type="checkbox"]:checked').forEach(chk => {
             checkedVals.push(chk.value);
@@ -1163,3 +1285,9 @@ class App {
 
 // Instantiate App
 const app = new App();
+
+// Explicit global. This file is a classic script, so `const app` already
+// resolves for the inline onclick="app.…" handlers in the markup — but the
+// components are ES modules and cannot see a script-scoped binding. Assigning
+// it here makes the dependency visible instead of implicit.
+window.app = app;

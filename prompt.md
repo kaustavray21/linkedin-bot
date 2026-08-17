@@ -1,22 +1,14 @@
-Budget for post discovery?
-$0 → manual paste + SERP only (URLs, authors, snippets; no engagement counts, no full text)
-~$30-50/mo → Apify actors (real keyword post search, full text, engagement) ← my recommendation for MVP
-$500+/mo → Bright Data (durable, legally hardened, production-grade)
+the ne w section inside the Create post instead of the reference text remove it  there should be a section that shows the fetched post from the discovery, . there should be a section where we can select the paragraph count and word count per para specific and the post that will be used for reference should be saved  inside  the db for future use and assign it a sentiment , this sentiment or the post type options  should be available while the post is getting used from discovery,   the generate draft option should use the selected post from the fetched posts to create the new post. i want to keep track of all the posts  that are used from the discovery section to generate the new posts, save them in the db and show them in a separate history section in the discovery section. only keep saved post for 30 days after that remove them from the db and history section.
 
-i want to use free
+Discovery Section :
+ the post's that are getting fetched the reach should increase to more latest post we should also be able to count the number of reactions from a post, we should also be able to  filter posts based to multiple drabble filters like number of  like range,last week last month last yers last 2-3 years, this is for the discovery section.
+ inside discovery there should be a history section that will show me all th eprevious ly fetched posts, i should be able to delete them by selection multiple at a time.
+ the posts that will be used to egenerate should show a pop up option before deleting if multiple osts are theryr their list should be visible before deleting them to verify if i really want to delete these posts as these are used to generate realsposts. Make the find and darft button a bit smaller and left aligned, the discoverd posts should show the image and texts  too alogh with the author url, 
+ add a proper loading animation in th ebody section when all the posts are getting fetched, in every search it should fetch the top 25- 30 posts. there should be multiple pages in the body section to view the differet number of posts, each page should contain at least 7 posts. we should have a seperate text bar for text  for sharing the hastags that i want to use to search for. 
 
-Is an image mandatory to publish, or just always-offered? (I recommend: always offered, never required.)
-keep it as always offered
+ Dashboard section:
+ they shoud contain a section insid eit where there will be  a link to all the linked in post that i have posted using this machine, i should be able to directly  visit those posts from the dashboard, in the dashboard alongh with the published post it should also show the post which is have used to draft my post, that is th epost from the discovery. make a more mordenized UI  for the claender inside schedule posts.
 
-Keep the combined blended-style option? (I recommend: keep it, but default to a single exemplar.)
-keep it
-Build the browser-extension capture path (Tier 3)? Highest-fidelity low-risk option, but it's a separate deliverable outside this repo.
-
-think of snother way , i donot want to do any thing mnually, i am automating stuff
-i want it all to be automated, i will provide the topic, bot should find top performing posts, images
-
-Retention on discovered post content — my default is 90 days, then drop raw text and keep only the structural fingerprint. Longer? Indefinite?
-okay keep the structural fingerprint , but also allow user to delete the fetched post after reviewing
-
-Similarity threshold — I've proposed Jaccard 0.25 / 8-word run. Stricter (more rejections, more distinct output) or looser (closer to the source's phrasing)?
-we will test this out and see
+ ----------------------------
+ I want to be able to track the impressions on my post alongh with links and comments that will be updated every 24 hours, or if the application restarts. for this create a sperate section inside dashboard. think of it as it will allow us to track data for marketing purposes and improvement of the bot.
+ 

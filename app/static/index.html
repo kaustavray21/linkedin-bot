@@ -216,11 +216,14 @@
 
                     <!-- C. CREATE POST VIEW -->
                     <section id="view-create" class="tab-view">
-                        <div class="wizard-container">
+                        <create-sections class="create-workspace">
+                          <div class="create-main">
                             <div class="card">
-                                <form id="post-creation-form" class="wizard-form">
+                                <!-- novalidate is load-bearing: a hidden section's `required`
+                                     field would otherwise block submit with no visible error. -->
+                                <form id="post-creation-form" class="wizard-form" novalidate>
                                      <!-- AI Copywriter & Style Assistant (Step 1) -->
-                                     <div class="form-section">
+                                     <div class="form-section" data-section="ai">
                                          <label class="section-label">1. Draft with AI Assistant (Optional)</label>
                                          <div class="ai-assist-box">
                                              <div class="ai-assist-header">
@@ -349,7 +352,7 @@
                                      </div>
 
                                      <!-- Review & Edit Post Body (Step 2) -->
-                                     <div class="form-section">
+                                     <div class="form-section" data-section="body">
                                          <label class="section-label" for="post-text-content">2. Review & Edit Post Body</label>
                                          <div class="textarea-container">
                                              <textarea id="post-text-content" rows="6" placeholder="What do you want to share today? Or generate one above..." required></textarea>
@@ -374,7 +377,7 @@
                                      </div>
 
                                      <!-- Image (Step 3) — always available; still optional to submit -->
-                                     <div id="image-generation-section" class="form-section">
+                                     <div id="image-generation-section" class="form-section" data-section="image">
                                          <label class="section-label">3. Add an Image <span style="font-weight: 400; color: var(--text-muted); font-size: 0.8rem;">(optional)</span></label>
 
                                         <div class="ai-assist-box image-box">
@@ -444,7 +447,7 @@
                                     </div>
  
                                     <!-- Scheduling -->
-                                    <div class="form-section">
+                                    <div class="form-section" data-section="schedule">
                                         <label class="section-label">4. Publish or Schedule</label>
                                         <div class="schedule-toggle-container">
                                             <div class="schedule-toggle-options">
@@ -468,16 +471,23 @@
                                         </div>
                                     </div>
  
-                                    <!-- Form Action -->
-                                    <div class="form-actions">
-                                        <button type="submit" id="btn-submit-post" class="btn btn-primary btn-lg">
-                                            <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
-                                            <span id="btn-submit-text">Publish Immediately</span>
-                                        </button>
-                                    </div>
                                 </form>
                             </div>
-                        </div>
+
+                            <div class="section-nav">
+                                <button type="button" class="btn btn-secondary" data-nav="prev">
+                                    <i class="fa-solid fa-arrow-left"></i> Back
+                                </button>
+                                <button type="button" class="btn btn-secondary" data-nav="next">
+                                    Next <i class="fa-solid fa-arrow-right"></i>
+                                </button>
+                            </div>
+                          </div>
+
+                          <!-- Section switcher + live summary of the post. Publish
+                               lives here so it is reachable from any section. -->
+                          <create-rail class="create-rail"></create-rail>
+                        </create-sections>
                     </section>
 
                     <!-- C. POST HISTORY VIEW -->
@@ -522,8 +532,14 @@
         </div>
     </div>
 
+    <confirm-modal id="confirm-modal"></confirm-modal>
+
     <!-- Scripts -->
+    <!-- api.js and app.js stay classic scripts on purpose: as a module,
+         `const app` would be module-scoped and every inline onclick="app.…"
+         handler would throw at click time. Only components/ is a module. -->
     <script src="/static/js/api.js"></script>
     <script src="/static/js/app.js"></script>
+    <script type="module" src="/static/js/components/index.js"></script>
 </body>
 </html>
