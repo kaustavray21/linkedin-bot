@@ -1026,7 +1026,7 @@ class App {
             // a draft is either fully the new version or fully the old one.
             const saved = this.draftId
                 ? await API.updatePost(this.draftId, fields)
-                : await API.createPost(fields.content, fields.image_url, fields.scheduled_time);
+                : await API.createPost(fields.content, fields.image_url, fields.scheduled_time, this.exemplarId);
 
             this.draftId = saved.id;
             await this.loadDrafts();
@@ -1297,7 +1297,7 @@ class App {
                       image_url: post.imageUrl || null,
                       scheduled_time: post.scheduledUtc,
                   })
-                : await API.createPost(post.content.trim(), post.imageUrl, post.scheduledUtc);
+                : await API.createPost(post.content.trim(), post.imageUrl, post.scheduledUtc, this.exemplarId);
 
             // Step B: If publish now, trigger active publishing immediately
             if (post.scheduleType === 'now') {
@@ -1416,7 +1416,17 @@ class App {
                 if (post.image_url) {
                     contentCell += `<img src="${post.image_url}" class="post-preview-img" alt="Thumbnail">`;
                 }
-                contentCell += `<span class="post-preview-text">${this.escapeHtml(post.content)}</span></div>`;
+                contentCell += `<span class="post-preview-text">${this.escapeHtml(post.content)}</span>`;
+                if (post.source_author || post.source_url) {
+                    // Rendered from the lineage snapshot, so it still works
+                    // after the discovered post itself has been deleted.
+                    const label = this.escapeHtml(post.source_author || 'a discovered post');
+                    contentCell += post.source_url
+                        ? `<a class="post-source" href="${this.escapeHtml(post.source_url)}"
+                              target="_blank" rel="noopener noreferrer">drafted from ${label} ↗</a>`
+                        : `<span class="post-source">drafted from ${label}</span>`;
+                }
+                contentCell += `</div>`;
                 
                 // Dates
                 let dateStr = '-';

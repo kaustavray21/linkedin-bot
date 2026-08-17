@@ -158,3 +158,40 @@ class DiscoveryJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+
+
+class DraftLineage(Base):
+    """Which discovered post a draft was cloned from — and enough of it to
+    survive that post being deleted.
+
+    Everything from `exemplar_url` down is a COPY taken at generation time, not
+    a join. Discovered posts are hard-deleted at 30 days; a lineage row that
+    only held a foreign key would go blank at exactly the moment the history is
+    worth having. The layout skeleton is copied for the same reason it survived
+    a purge before — it carries no wording from the source, and it is what keeps
+    an already-generated draft reproducible.
+    """
+
+    __tablename__ = "draft_lineage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Both nullable with ON DELETE SET NULL: either side can go away, and the
+    # snapshot below is what the history actually renders from.
+    post_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("posts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    discovered_post_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("discovered_posts.id", ondelete="SET NULL"), nullable=True
+    )
+
+    exemplar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    exemplar_author: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    exemplar_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exemplar_reactions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exemplar_comments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exemplar_captured_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    exemplar_skeleton: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    params_used: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    used_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

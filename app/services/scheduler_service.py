@@ -93,9 +93,9 @@ class SchedulerService:
         session_factory = get_session_factory()
         async with session_factory() as session:
             try:
-                from app.services.discovery.service import purge_expired
+                from app.services.discovery.service import delete_expired
 
-                purged = await purge_expired(session)
+                purged = await delete_expired(session)
                 if purged:
                     await session.commit()
             except Exception as e:

@@ -13,13 +13,15 @@ from app.services.post_service import PostService
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 
-def _post_to_response(post: Post) -> PostResponse:
+def _post_to_response(post: Post, lineage=None) -> PostResponse:
     return PostResponse(
         id=post.id,
         user_id=post.user_id,
         content=post.content,
         image_url=post.image_url,
         image_source=post.image_source,
+        source_url=lineage.exemplar_url if lineage else None,
+        source_author=lineage.exemplar_author if lineage else None,
         status=post.status,
         linkedin_post_id=post.linkedin_post_id,
         scheduled_time=post.scheduled_time,
@@ -43,6 +45,7 @@ async def create_post(
             image_url=body.image_url,
             image_source=body.image_source,
             scheduled_time=body.scheduled_time,
+            exemplar_id=body.exemplar_id,
         )
         return _post_to_response(post)
     except AppException as e:
@@ -68,7 +71,21 @@ async def list_posts(
         wanted = {s.strip() for s in status.split(",") if s.strip()}
         posts = [p for p in posts if p.status in wanted]
 
-    return [_post_to_response(p) for p in posts]
+    # One query for every post's provenance rather than one per post.
+    from sqlalchemy import select as _select
+
+    from app.database.models import DraftLineage
+
+    ids = [p.id for p in posts]
+    lineage_by_post = {}
+    if ids:
+        rows = (
+            await db.execute(_select(DraftLineage).where(DraftLineage.post_id.in_(ids)))
+        ).scalars().all()
+        for row in rows:
+            lineage_by_post.setdefault(row.post_id, row)
+
+    return [_post_to_response(p, lineage_by_post.get(p.id)) for p in posts]
 
 
 @router.get("/{post_id}", response_model=PostResponse)

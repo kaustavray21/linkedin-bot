@@ -51,6 +51,7 @@ class PostService:
         image_url: str | None = None,
         scheduled_time=None,
         image_source: str | None = None,
+        exemplar_id: int | None = None,
     ) -> Post:
         status = POST_STATUS_SCHEDULED if scheduled_time else POST_STATUS_DRAFT
         post = await self.post_repo.create(
@@ -61,6 +62,25 @@ class PostService:
             status=status,
             scheduled_time=scheduled_time,
         )
+        if exemplar_id is not None:
+            # Best effort: a draft is more valuable than its provenance, so a
+            # missing exemplar loses the lineage rather than the post.
+            from sqlalchemy import select as _select
+
+            from app.database.models import DiscoveredPost
+            from app.services.discovery.service import record_lineage
+
+            exemplar = (
+                await self.session.execute(
+                    _select(DiscoveredPost).where(DiscoveredPost.id == exemplar_id)
+                )
+            ).scalar_one_or_none()
+            if exemplar is not None:
+                await record_lineage(self.session, post.id, exemplar)
+            else:
+                log.warning("Exemplar vanished before lineage was recorded",
+                            exemplar_id=exemplar_id, post_id=post.id)
+
         log.info("Draft created", post_id=post.id, user_id=user_id, status=status)
         return post
 

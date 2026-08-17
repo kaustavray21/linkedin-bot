@@ -59,13 +59,14 @@ const API = {
     // ----------------------------------------------------------------- POSTS --
 
     // Create a new post draft or scheduled post
-    async createPost(content, imageUrl = null, scheduledTime = null) {
+    async createPost(content, imageUrl = null, scheduledTime = null, exemplarId = null) {
         return this.request('/posts/', {
             method: 'POST',
             body: JSON.stringify({
                 content,
                 image_url: imageUrl,
-                scheduled_time: scheduledTime
+                scheduled_time: scheduledTime,
+                exemplar_id: exemplarId
             })
         });
     },

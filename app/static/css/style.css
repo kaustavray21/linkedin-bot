@@ -2044,3 +2044,9 @@ schedule-calendar { display: block; }
 
 a.badge { text-decoration: none; }
 a.badge:hover { filter: brightness(1.25); }
+
+.post-source {
+    display: block; margin-top: 4px; font-size: 0.72rem;
+    color: var(--text-muted); text-decoration: none;
+}
+a.post-source:hover { color: var(--color-linkedin); text-decoration: underline; }

@@ -12,6 +12,9 @@ class PostCreate(BaseModel):
     # returned this; nothing carried it as far as the post until now.
     image_source: str | None = None
     scheduled_time: datetime | None = None
+    # Which discovered post this draft was cloned from, if any. Recorded once,
+    # at creation — the snapshot has to be taken while that post still exists.
+    exemplar_id: int | None = None
 
 
 class PostUpdate(BaseModel):
@@ -35,6 +38,10 @@ class PostResponse(BaseModel):
     content: str
     image_url: str | None
     image_source: str | None = None
+    # Denormalised from draft_lineage so History and the Dashboard can show
+    # provenance after the discovered post itself has been deleted.
+    source_url: str | None = None
+    source_author: str | None = None
     status: str
     linkedin_post_id: str | None
     scheduled_time: datetime | None

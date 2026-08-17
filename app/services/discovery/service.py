@@ -19,13 +19,13 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.database.models import DiscoveredPost, DiscoveryJob
+from app.database.models import DiscoveredPost, DiscoveryJob, DraftLineage
 from app.services.discovery.egress.base import EgressError
 from app.services.discovery.fetcher import fetcher
 from app.services.discovery.parser import parse_post
@@ -370,6 +370,78 @@ async def purge_post(db: AsyncSession, post: DiscoveredPost) -> None:
     post.raw_payload = None
     post.image_url = None
     post.purged_at = _utcnow()
+
+
+async def record_lineage(
+    db: AsyncSession,
+    post_id: int | None,
+    exemplar: DiscoveredPost,
+    params: dict | None = None,
+) -> DraftLineage:
+    """Snapshot the exemplar onto the draft, at generation time.
+
+    A copy, not a join. The discovered post is hard-deleted at 30 days, and a
+    lineage row holding only its id would go blank exactly when the record
+    starts being interesting. The skeleton comes along for the same reason it
+    used to survive a purge: no wording from the source, and it is what keeps an
+    already-generated draft reproducible.
+    """
+    lineage = DraftLineage(
+        post_id=post_id,
+        discovered_post_id=exemplar.id,
+        exemplar_url=exemplar.post_url,
+        exemplar_author=exemplar.author_name,
+        exemplar_snippet=(exemplar.content_text or exemplar.snippet or "")[:400] or None,
+        exemplar_reactions=exemplar.reactions,
+        exemplar_comments=exemplar.comments,
+        exemplar_captured_at=exemplar.fetched_at,
+        exemplar_skeleton=exemplar.layout_skeleton,
+        params_used=params or {},
+        used_at=_utcnow(),
+    )
+    db.add(lineage)
+    exemplar.used_as_reference = True
+    await db.flush()
+    return lineage
+
+
+async def delete_expired(db: AsyncSession) -> int:
+    """Remove discovered posts past their retention date.
+
+    A real delete, not a purge. Third-party content is not ours to keep, and 30
+    days was the answer. Drafts built from these posts stay reproducible because
+    draft_lineage already holds the snapshot, and its foreign key is ON DELETE
+    SET NULL so the history survives the row going away.
+    """
+    result = await db.execute(
+        select(DiscoveredPost).where(
+            DiscoveredPost.expires_at.is_not(None),
+            DiscoveredPost.expires_at <= _utcnow(),
+        )
+    )
+    posts = list(result.scalars().all())
+    if not posts:
+        return 0
+
+    # Detach the lineage explicitly rather than trusting ON DELETE SET NULL.
+    # That constraint is enforced by the database, which means two things go
+    # wrong if we rely on it: SQLAlchemy's session keeps whatever value it
+    # already loaded, so in-flight objects still point at a deleted row, and
+    # SQLite does not enforce foreign keys unless PRAGMA foreign_keys is on —
+    # so it may not fire at all. The constraint stays as a backstop for deletes
+    # that happen outside this function.
+    ids = [p.id for p in posts]
+    await db.execute(
+        update(DraftLineage)
+        .where(DraftLineage.discovered_post_id.in_(ids))
+        .values(discovered_post_id=None)
+        .execution_options(synchronize_session="fetch")
+    )
+
+    for post in posts:
+        await db.delete(post)
+    log.info("Deleted expired discovered posts", count=len(posts))
+    return len(posts)
 
 
 async def purge_expired(db: AsyncSession) -> int:
