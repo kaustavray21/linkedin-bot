@@ -1,8 +1,34 @@
 # Plan — Parallel Discovery, Discovery-Driven Generation & a Self-Healing Feedback Loop
 
-Date: 2026-08-17 (rev 6 — S0, P0 and P1 executed)
+Date: 2026-08-17 (rev 7 — S0, S1, P0–P3, P5, P6 executed)
 Branch: `jul-9-contentGeneration-fix-branch`
-Status: **IN PROGRESS — S0 ✅ · P0 ✅ · P1 ✅ · P2 ✅ · S1 and P3–P7 outstanding**
+Status: **IN PROGRESS — S0 ✅ · S1 ✅ · P0 ✅ · P1 ✅ · P2 ✅ · P3 ✅ · P5 ✅ · P6 ✅ · P4 and P7 outstanding**
+
+## EXECUTION LOG — S1 (2026-08-18)
+
+**Rendered tier: NO-GO.** Measured against 35 real post URLs, plain HTTP and headless Chrome 151.
+
+| | plain HTTP | headless Chrome |
+|---|---|---|
+| reactions readable | **32/35 (91%)** | 8/8 on the same subset |
+| counts only rendering could read | — | **0/8** |
+| rescued the plain tier's 3 misses | — | **0/3** |
+| median wall-clock | **1.10 s** | 7.96 s |
+| memory | negligible | ~800 MB browser tree |
+| blocked / authwalled | 0/35 | 0/11 |
+
+§2.5's premise was wrong. LinkedIn does **not** hydrate the post's own counts client-side — they are server-rendered as `data-num-reactions` / `data-num-comments` on the `social-actions__*` anchors. The parser reads 0/35 reactions because it greps for `"numLikes"` / `"reactionCount"`, JSON keys that appear **nowhere** on these pages. Nothing needs rendering; the fast tier needs a working extractor.
+
+Two further findings, both live defects:
+
+1. **JSON-LD `commentCount` is a false zero on 6 of 32 posts** — it counts the inlined `comment[]` array, not real comments. One post shows 1,113 reactions and 26 comments while the JSON-LD reports `commentCount: 0` and `LikeAction: 0`. `describe_basis()` then labels the row `"measured"`, so the UI presents a confident wrong zero — the precise failure §5a's invariant forbids.
+2. **Reposts are not published at all** (0/35, both tiers). `RANK_W_REPOSTS` weights a term that is `None` on every row.
+
+The parallel-rendering-block question is moot: a tier with 0% information gain does not get built at any block rate, so no further live requests were spent on it.
+
+Harness: `scripts/spike_rendered_counts.py` (re-runnable). Full write-up: `~/.anvideck/projects/linkedin-bot/ref/GROUND_TRUTH_LINKEDIN_PUBLIC_POST_COUNTS.md`.
+
+**Consequence for P4/P7:** ⑨/⑩ become real via a parser fix, not a browser. The like-range filter currently excludes 100% of results because `reactions` is `NULL` on every stored row.
 
 ## EXECUTION LOG — P2 (2026-08-17)
 
@@ -396,8 +422,10 @@ Retention 90 → 30. Fetcher settings per §2.1.
 ### S0 — Own-post analytics spike
 Can impressions be read for a personal member post, with which scope/endpoint? Likes/comments? Does your app tier grant it or need approval? What does re-consent cost? → Ground Truth doc + go/no-go on ㉒ and half of ㉓.
 
-### S1 — Reaction-count spike
+### S1 — Reaction-count spike ✅ *(2026-08-18 — NO-GO on the rendered tier)*
 Headless Chrome against 5–10 real public post URLs. How often do rendered pages expose counts a plain fetch misses? Per-page cost? Does parallel rendering trip blocks faster than parallel HTTP? → hit-rate number + go/no-go on the rendered tier. Makes ⑨/⑩ real rather than decorative.
+
+**Answer: never.** 0/8 gain on readable pages, 0/3 rescue on unreadable ones, 7× the wall-clock, ~800 MB. The counts were in the plain HTML all along, under `data-num-reactions`. See the S1 execution log at the top.
 
 ### P0 — Delete the reference subsystem
 Everything in §2.4's left column, plus a migration dropping both tables.
