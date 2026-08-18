@@ -68,6 +68,7 @@ class DiscoveredPostResponse(BaseModel):
     comments: int | None
     reposts: int | None
     metrics_source: str
+    post_type_slug: str | None
     engagement_score: float
     used_as_reference: bool
     reviewed_at: datetime | None
@@ -123,6 +124,7 @@ def _post_to_response(post: DiscoveredPost) -> DiscoveredPostResponse:
         comments=post.comments,
         reposts=post.reposts,
         metrics_source=post.metrics_source,
+        post_type_slug=post.post_type_slug,
         engagement_score=post.engagement_score,
         used_as_reference=post.used_as_reference,
         reviewed_at=post.reviewed_at,

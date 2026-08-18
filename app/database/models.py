@@ -119,6 +119,12 @@ class DiscoveredPost(Base):
     reposts: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metrics_source: Mapped[str] = mapped_column(String(20), default="inferred", nullable=False)
 
+    # The slug rather than a foreign key: types get merged, and a post already
+    # classified into the losing type still has to resolve to something. The
+    # merge repoints these; a NULL here means "not classified", which is a
+    # normal outcome whenever the classifier refused.
+    post_type_slug: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+
     serp_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
     query_overlap: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     engagement_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

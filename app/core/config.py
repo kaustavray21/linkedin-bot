@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     # Discovery — retention
     discovery_retention_days: int = 30
 
+    # Discovery — classify every fetched post into a post type. One model call
+    # per post, run concurrently across each fetch wave. Turn it off to keep a
+    # search to its network cost alone; stored posts then carry no type.
+    discovery_classify: bool = True
+
     # Ranking weights (hybrid score — see plan 3.9)
     rank_w_reactions: float = 1.0
     rank_w_comments: float = 1.5

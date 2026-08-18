@@ -60,3 +60,19 @@ async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_live_classification(monkeypatch):
+    """Keep post-type classification out of every test by default.
+
+    Discovery classifies each fetched post, and the classifier builds a real
+    AIService unless one is injected. Left on, the discovery tests reach the
+    live Gemini API — which made the suite depend on the network, took it from
+    12s to 82s, and put model latency inside the fetcher's timing assertions.
+
+    Tests that exercise classification turn it back on and supply a fake.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "discovery_classify", False)

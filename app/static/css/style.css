@@ -728,6 +728,20 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--text-muted);
 }
 
+/* Deliberately quieter than the metrics badge. A post type is a classification
+   the system made, not a number it read off the page. */
+.discovered-type {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    vertical-align: middle;
+    background: rgba(120, 150, 255, 0.12);
+    color: #8fa6ff;
+    text-transform: capitalize;
+}
+
 .discovered-preview {
     font-size: 0.88rem;
     color: var(--text-secondary);

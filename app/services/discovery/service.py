@@ -32,6 +32,7 @@ from app.services.discovery.parser import parse_post
 from app.services.discovery.providers import DiscoveredCandidate, get_provider
 from app.services.discovery.ranking import compute_score, describe_basis
 from app.services.layout_service import extract_skeleton
+from app.services.post_type_service import load_taxonomy, propose_type, resolve_proposal
 
 log = get_logger(tag="discovery")
 
@@ -149,7 +150,14 @@ async def run_discovery(
     usable = 0
     parse_failures = 0
     collisions = 0
+    classified_new = 0
+    classify_refusals = 0
     stop_reason: str | None = None
+
+    # Read once per run, as plain dicts. Anything a coined type adds mid-run is
+    # still caught: the near-duplicate guard in resolve_proposal compares against
+    # the live table, not against this snapshot.
+    taxonomy = await load_taxonomy(db) if settings.discovery_classify else []
 
     async def _fetch_one(candidate: DiscoveredCandidate):
         """Runs concurrently. Touches the network and nothing else.
@@ -164,6 +172,30 @@ async def run_discovery(
             return candidate, await fetcher.fetch(candidate.post_url), None
         except EgressError as exc:
             return candidate, None, exc
+
+    async def _classify_wave(parsed_posts: list, current: list[dict]) -> list:
+        """Classify a wave concurrently. Touches the network, never `db`.
+
+        Returns one entry per post, aligned by position, so the serial section
+        can zip the two together. None means "do not classify this one" — either
+        the feature is off or there was no text to read.
+        """
+        if not settings.discovery_classify:
+            return [None] * len(parsed_posts)
+
+        async def _one(parsed):
+            text = (parsed.content_text or "").strip()
+            if not text:
+                return None
+            try:
+                return await propose_type(text, current)
+            except Exception as exc:
+                # Classification is an enrichment. A failure here must never
+                # cost the post, which is the expensive thing on this path.
+                log.warning("Classification failed for a post", error=str(exc))
+                return None
+
+        return await asyncio.gather(*(_one(p) for p in parsed_posts))
 
     # Dispatched in waves rather than all at once so `stop_after_usable` still
     # means something. A single gather over every candidate spends the whole
@@ -180,7 +212,10 @@ async def run_discovery(
         wave = fresh[offset : offset + wave_size]
         results = await asyncio.gather(*(_fetch_one(c) for c in wave))
 
-        # Serial section — one task, one session.
+        # Parsing is pure and cheap, so it happens here rather than in the
+        # workers — but it has to happen before classification, which needs the
+        # post text.
+        read: list[tuple[DiscoveredCandidate, object]] = []
         for candidate, result, error in results:
             if error is not None:
                 # Budget exhausted or circuit open. Both mean stop the whole run
@@ -194,8 +229,30 @@ async def run_discovery(
                 usable += 1
             else:
                 parse_failures += 1
+            read.append((candidate, parsed))
 
+        # Second parallel stage. Classification is a model call per post, so
+        # running the wave serially would add minutes to a pipeline tuned to
+        # seconds. Like _fetch_one it touches the network and never `db`; the
+        # taxonomy was copied to plain dicts for exactly this crossing.
+        proposals = await _classify_wave([p for _, p in read], taxonomy)
+
+        # Serial section — one task, one session.
+        for (candidate, parsed), proposal in zip(read, proposals):
             post = _build_post(candidate, parsed, keyword, user_id)
+
+            if proposal is not None:
+                # Resolution writes, so it belongs here rather than in the
+                # workers. A refusal leaves post_type_slug NULL — an
+                # unclassified post is fine; a wrongly classified one pollutes
+                # the taxonomy every later classification is prompted with.
+                resolution = await resolve_proposal(db, proposal)
+                post.post_type_slug = resolution.slug
+                if resolution.created:
+                    classified_new += 1
+                elif resolution.refused:
+                    classify_refusals += 1
+
             try:
                 # Savepoint per row: two jobs searching at once can both reach
                 # the same URL after the dedup check above, and `post_url` is
@@ -228,6 +285,13 @@ async def run_discovery(
 
     if collisions:
         log.info("Absorbed duplicate posts already stored", count=collisions)
+
+    if settings.discovery_classify:
+        log.info(
+            "Classification complete",
+            new_types=classified_new,
+            refused=classify_refusals,
+        )
 
     job.fetched_count = stored
     job.parse_failures = parse_failures

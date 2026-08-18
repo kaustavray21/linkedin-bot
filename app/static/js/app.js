@@ -381,6 +381,14 @@ class App {
         const preview = (post.content_text || post.snippet || '(content removed)')
             .slice(0, 260);
 
+        // No badge rather than an "unknown" one. The classifier refuses when the
+        // model is unavailable, and a post with no type is a normal outcome that
+        // does not need explaining on every card.
+        const typeEl = post.post_type_slug
+            ? `<span class="discovered-type">${this.escapeHtml(
+                   post.post_type_slug.replace(/_/g, ' '))}</span>`
+            : '';
+
         // The author's own profile, when the parser found it. Linking the name
         // rather than only the post is what makes a creator followable from here.
         const author = this.escapeHtml(post.author_name || 'Unknown author');
@@ -404,6 +412,7 @@ class App {
                         ? `<span class="discovered-headline">${this.escapeHtml(post.author_headline)}</span>`
                         : ''}
                     <span class="discovered-basis ${post.metrics_source}">${this.escapeHtml(basis)}</span>
+                    ${typeEl}
                 </div>
                 <a href="${this.escapeHtml(post.post_url)}" target="_blank" rel="noopener noreferrer"
                    class="btn btn-secondary btn-sm">Open ↗</a>

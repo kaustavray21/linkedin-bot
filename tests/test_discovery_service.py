@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -256,3 +257,136 @@ async def test_retention_window_comes_from_config(db_session, monkeypatch, fake_
 
     post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
     assert 6 <= (post.expires_at - _now()).days <= 7
+
+
+# ------------------------------------------------------------ classification --
+
+def _enable_classification(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "discovery_classify", True)
+
+
+async def _seed_types(db, *slugs):
+    from app.database.models import PostType
+
+    for slug in slugs:
+        db.add(PostType(slug=slug, label=slug.title(), description=f"The {slug} type",
+                        origin="seed"))
+    await db.flush()
+
+
+@pytest.mark.asyncio
+async def test_every_stored_post_gets_classified(db_session, monkeypatch, fake_pipeline):
+    from app.services.post_type_service import TypeProposal
+
+    _enable_classification(monkeypatch)
+    await _seed_types(db_session, "story")
+    monkeypatch.setattr(
+        "app.services.discovery.service.get_provider",
+        lambda name: FakeProvider([POST_A, POST_B]),
+    )
+    monkeypatch.setattr(
+        "app.services.discovery.service.propose_type",
+        AsyncMock(return_value=TypeProposal(existing_slug="story")),
+    )
+
+    await run_discovery(db_session, keyword="shipping", limit=5)
+
+    posts = (await db_session.execute(select(DiscoveredPost))).scalars().all()
+    assert len(posts) == 2
+    assert {p.post_type_slug for p in posts} == {"story"}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_classification_still_stores_the_post(db_session, monkeypatch, fake_pipeline):
+    """Classification is enrichment. Losing the post — the expensive thing on
+    this path — because a model was unreachable would be the wrong trade."""
+    from app.services.post_type_service import TypeProposal
+
+    _enable_classification(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.discovery.service.get_provider",
+        lambda name: FakeProvider([POST_A]),
+    )
+    monkeypatch.setattr(
+        "app.services.discovery.service.propose_type",
+        AsyncMock(return_value=TypeProposal(refused="the classifier was unavailable")),
+    )
+
+    job = await run_discovery(db_session, keyword="shipping", limit=5)
+
+    assert job.status == "success"
+    post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
+    assert post.post_type_slug is None
+
+
+@pytest.mark.asyncio
+async def test_a_classifier_crash_does_not_take_the_run_down(db_session, monkeypatch, fake_pipeline):
+    _enable_classification(monkeypatch)
+    monkeypatch.setattr(
+        "app.services.discovery.service.get_provider",
+        lambda name: FakeProvider([POST_A]),
+    )
+    monkeypatch.setattr(
+        "app.services.discovery.service.propose_type",
+        AsyncMock(side_effect=RuntimeError("model exploded")),
+    )
+
+    job = await run_discovery(db_session, keyword="shipping", limit=5)
+
+    assert job.status == "success"
+    assert job.fetched_count == 1
+    post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
+    assert post.post_type_slug is None
+
+
+@pytest.mark.asyncio
+async def test_classification_runs_before_any_of_the_writing(db_session, monkeypatch, fake_pipeline):
+    """The wave proposes in parallel, then resolves serially. If a proposal were
+    awaited inside the write loop instead, the model calls would serialise and a
+    30-post search would take minutes rather than seconds."""
+    from app.services.post_type_service import TypeProposal
+
+    _enable_classification(monkeypatch)
+    await _seed_types(db_session, "story")
+    order: list[str] = []
+
+    async def _propose(text, taxonomy, ai_service=None):
+        order.append("propose")
+        return TypeProposal(existing_slug="story")
+
+    real_resolve = __import__(
+        "app.services.post_type_service", fromlist=["resolve_proposal"]
+    ).resolve_proposal
+
+    async def _resolve(db, proposal):
+        order.append("resolve")
+        return await real_resolve(db, proposal)
+
+    monkeypatch.setattr("app.services.discovery.service.get_provider",
+                        lambda name: FakeProvider([POST_A, POST_B]))
+    monkeypatch.setattr("app.services.discovery.service.propose_type", _propose)
+    monkeypatch.setattr("app.services.discovery.service.resolve_proposal", _resolve)
+
+    await run_discovery(db_session, keyword="shipping", limit=5)
+
+    # Both proposals are made before either resolution touches the session.
+    assert order == ["propose", "propose", "resolve", "resolve"]
+
+
+@pytest.mark.asyncio
+async def test_classification_off_stores_posts_with_no_type(db_session, monkeypatch, fake_pipeline):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "discovery_classify", False)
+    monkeypatch.setattr("app.services.discovery.service.get_provider",
+                        lambda name: FakeProvider([POST_A]))
+    called = AsyncMock()
+    monkeypatch.setattr("app.services.discovery.service.propose_type", called)
+
+    await run_discovery(db_session, keyword="shipping", limit=5)
+
+    called.assert_not_awaited()
+    post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
+    assert post.post_type_slug is None
