@@ -195,3 +195,44 @@ class DraftLineage(Base):
 
     params_used: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     used_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class PostType(Base):
+    """A kind of post — `story`, `contrarian`, and whatever the model coins next.
+
+    The taxonomy extends itself: when a discovered post fits none of the existing
+    types, the classifier registers a new one without asking. `origin` and
+    `why_new` are what keep that honest — every row records whether a human
+    seeded it or a model invented it, and in the latter case the reason given at
+    the time. Auto-add without permission, never without a record.
+
+    `usage_count` and `last_used_at` are not decoration. An unconstrained
+    taxonomy drifts into `storytelling`, `personal_story` and `narrative` as
+    three separate types within a week, at which point classification means
+    nothing; those two columns are what let a merge pass find the coinages that
+    were used once and never again.
+
+    Merged types are deactivated rather than deleted, with `merged_into_id`
+    pointing at the survivor: posts already classified into the loser still need
+    somewhere to resolve.
+    """
+
+    __tablename__ = "post_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    slug: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    origin: Mapped[str] = mapped_column(String(10), default="ai", nullable=False)  # seed | ai
+    why_new: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    merged_into_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("post_types.id", ondelete="SET NULL"), nullable=True
+    )
