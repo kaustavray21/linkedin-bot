@@ -28,7 +28,24 @@ The parallel-rendering-block question is moot: a tier with 0% information gain d
 
 Harness: `scripts/spike_rendered_counts.py` (re-runnable). Full write-up: `~/.anvideck/projects/linkedin-bot/ref/GROUND_TRUTH_LINKEDIN_PUBLIC_POST_COUNTS.md`.
 
-**Consequence for P4/P7:** ⑨/⑩ become real via a parser fix, not a browser. The like-range filter currently excludes 100% of results because `reactions` is `NULL` on every stored row.
+**Consequence for P4/P7:** ⑨/⑩ become real via a parser fix, not a browser.
+
+## EXECUTION LOG — count extractor fix (2026-08-18)
+
+⑨/⑩ are now real. `parser.py` reads the counts off the post's own social-actions anchors and no longer consults the JSON-LD figures. All 35 stored rows re-read via `scripts/backfill_post_counts.py` (dry by default).
+
+| | before | after |
+|---|---|---|
+| `reactions` populated | 0/35 | **32/35** |
+| `comments` populated | 35/35, six of them false zeros | **21/35, all verified** |
+| `reposts` populated | 0/35 | 0/35 — never published |
+| `metrics_source` | 35 `measured` | 32 `measured`, 3 `inferred` |
+
+The like-range filter went from excluding 100% of results to filtering 32 of 35.
+
+**The trap that nearly shipped:** `data-num-reactions` is not unique — it occurs up to **11 times** per page on byte-identical anchors, because the related-posts rail repeats the whole card. First-match works today only because the post's card precedes the rail. The extractor selects structurally instead: the `article.main-feed-activity-card` with no `section.related-posts` ancestor. First-match had already cost accuracy — it credited five posts with neighbours' comment counts (26/35 readable vs the true 21/35).
+
+**Why the old tests never caught any of this:** they asserted against `'"numLikes":842'`, a JSON key that appears nowhere on a real page. The fixtures were invented rather than captured, so the suite stayed green while the feature was 0% effective in production. Fixtures now model captured markup, rail included, and two tests pin the rail exclusion — one with the rail after the post, one with it before, so the rule cannot decay into "take the first card".
 
 ## EXECUTION LOG — P2 (2026-08-17)
 

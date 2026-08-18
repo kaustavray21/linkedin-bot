@@ -10,12 +10,14 @@ and reports how far it got:
 
   1. JSON-LD (<script type="application/ld+json">) — fullest: body, author, date
   2. Open Graph meta tags — author and a usually-truncated body, plus og:image
-  3. Embedded JSON blobs — where reaction and comment counts sometimes appear
-  4. Nothing usable — the caller keeps the SERP snippet and the link
+  3. Nothing usable — the caller keeps the SERP snippet and the link
 
-Layers 1 and 3 need raw HTML. A markdown egress (see egress/base.py) has already
-stripped <script> tags, so those layers are skipped rather than attempted and
-reported as failures — the distinction matters when diagnosing empty results.
+Layer 1 needs raw HTML. A markdown egress (see egress/base.py) has already
+stripped <script> tags, so that layer is skipped rather than attempted and
+reported as a failure — the distinction matters when diagnosing empty results.
+
+Engagement counts come from the markup rather than from any of those layers; see
+_extract_counts for where they live and why the JSON-LD figures are not used.
 """
 
 from __future__ import annotations
@@ -33,11 +35,6 @@ from app.services.discovery.egress.base import FetchResult
 log = get_logger(tag="discovery")
 
 HASHTAG_RE = re.compile(r"#\w+")
-COUNT_PATTERNS = {
-    "reactions": re.compile(r'"numLikes"\s*:\s*(\d+)|"reactionCount"\s*:\s*(\d+)'),
-    "comments": re.compile(r'"numComments"\s*:\s*(\d+)|"commentCount"\s*:\s*(\d+)'),
-    "reposts": re.compile(r'"numShares"\s*:\s*(\d+)|"shareCount"\s*:\s*(\d+)'),
-}
 
 AUTHWALL_MARKERS = (
     "authwall",
@@ -98,14 +95,68 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed.replace(tzinfo=None) if parsed.tzinfo is None else parsed.astimezone().replace(tzinfo=None)
 
 
-def _extract_counts(html: str) -> dict[str, int | None]:
+def _post_card(soup: BeautifulSoup):
+    """The <article> for the post itself.
+
+    The same card markup repeats for every entry in the "related posts" rail at
+    the foot of the page — up to eleven copies observed on one page — so taking
+    the first match in the document reads a stranger's numbers. Excluding the
+    rail explicitly says which card is meant, rather than relying on the post's
+    own card happening to come first.
+    """
+    for card in soup.find_all("article", class_="main-feed-activity-card"):
+        if card.find_parent("section", class_="related-posts") is None:
+            return card
+    return None
+
+
+def _anchor_count(card, test_id: str, attribute: str) -> int | None:
+    anchor = card.find("a", attrs={"data-test-id": test_id})
+    if anchor is None:
+        return None
+    raw = anchor.get(attribute)
+    return int(raw) if raw and raw.isdigit() else None
+
+
+def _extract_counts(soup: BeautifulSoup) -> dict[str, int | None]:
+    """Engagement counts, read from the social-actions anchors.
+
+    LinkedIn server-renders the post's own counts into the initial HTML as
+    data-num-* attributes. They are not hydrated client-side: a headless browser
+    was measured returning byte-identical numbers on every page a plain fetch
+    could read, and rescuing none of the pages it could not (spike S1). There is
+    no rendered tier for this and no reason to build one.
+
+    The JSON-LD figures are deliberately not used. `commentCount` there reports
+    the length of the inlined `comment[]` array rather than the real total — it
+    read 0 on six of thirty-two sampled posts, including one showing 26 comments
+    on the page — and the `LikeAction` counter reads 0 on posts with four-figure
+    reaction counts. A wrong number is worse than no number here, because
+    describe_basis() would then label the row "measured".
+
+    Anchored on data-test-id rather than class names: the classes are
+    utility-CSS soup that turns over with every redesign, while these ids held
+    across every page sampled.
+
+    An absent anchor stays None. On a post with no engagement LinkedIn omits the
+    block entirely, so absence is *probably* a genuine zero — but that is an
+    inference about missing markup, and the ranking rule is that a count we did
+    not read is None, never 0.
+    """
     counts: dict[str, int | None] = {"reactions": None, "comments": None, "reposts": None}
-    for key, pattern in COUNT_PATTERNS.items():
-        match = pattern.search(html)
-        if match:
-            value = next((g for g in match.groups() if g is not None), None)
-            if value is not None:
-                counts[key] = int(value)
+
+    card = _post_card(soup)
+    if card is None:
+        return counts
+
+    counts["reactions"] = _anchor_count(
+        card, "social-actions__reactions", "data-num-reactions"
+    )
+    counts["comments"] = _anchor_count(
+        card, "social-actions__comments", "data-num-comments"
+    )
+    # Reposts stay None by construction: no repost or share count is published
+    # on a public post page in any form (0 of 35 sampled, plain and rendered).
     return counts
 
 
@@ -226,7 +277,7 @@ def parse_post(result: FetchResult) -> ParsedPost:
         if not _from_jsonld(soup, post):
             _from_opengraph(soup, post)
 
-        counts = _extract_counts(content)
+        counts = _extract_counts(soup)
         post.reactions = counts["reactions"]
         post.comments = counts["comments"]
         post.reposts = counts["reposts"]

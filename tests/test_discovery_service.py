@@ -14,15 +14,28 @@ from app.services.discovery.service import purge_expired, purge_post, run_discov
 POST_A = "https://www.linkedin.com/posts/dana_x-activity-111"
 POST_B = "https://www.linkedin.com/posts/sam_y-activity-222"
 
+# Counts sit on the social-actions anchors, not in the JSON-LD — see the parser
+# fixtures in test_discovery.py for why this shape and not a JSON blob.
 PAGE = """
 <html><head>
 <script type="application/ld+json">
 {"@type":"DiscussionForumPosting",
  "articleBody":"I shipped it.\\n\\nTwice.\\n\\nHere is the lesson learned. #BuildInPublic",
  "datePublished":"2026-07-01T10:00:00Z",
+ "comment":[],
+ "commentCount":0,
  "author":{"name":"Dana Lin"},
  "image":{"url":"https://media.licdn.com/a.jpg"}}
-</script></head><body>"numLikes":500,"numComments":40</body></html>
+</script></head><body><main><section class="mb-3">
+<article class="relative container-lined main-feed-activity-card">
+  <div class="flex items-center main-feed-activity-card__social-actions">
+    <a data-test-id="social-actions__reactions" data-id="social-actions__reactions"
+       aria-label="500 Reactions" data-num-reactions="500">
+       <span data-test-id="social-actions__reaction-count">500</span></a>
+    <a data-test-id="social-actions__comments" data-num-comments="40">40 Comments</a>
+  </div>
+</article>
+</section></main></body></html>
 """
 
 

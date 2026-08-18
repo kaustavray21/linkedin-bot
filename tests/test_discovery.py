@@ -177,17 +177,74 @@ async def test_circuit_closes_after_cooldown(no_pacing, monkeypatch):
 
 # ------------------------------------------------------------------ parser --
 
-JSONLD_PAGE = """
+# Modelled on real markup rather than invented. The previous fixtures asserted
+# against '"numLikes":842' — a JSON key that appears nowhere on a LinkedIn post
+# page — so the parser tests passed for months while the shipping parser read a
+# reaction count on 0 of 35 live posts. Counts live on the social-actions
+# anchors, and the JSON-LD block carries a contradicting commentCount that must
+# be ignored.
+
+
+def _social_actions(reactions: int | None, comments: int | None) -> str:
+    parts = []
+    if reactions is not None:
+        parts.append(
+            f'<a data-test-id="social-actions__reactions" '
+            f'data-id="social-actions__reactions" aria-label="{reactions} Reactions" '
+            f'data-num-reactions="{reactions}">'
+            f'<span data-test-id="social-actions__reaction-count">{reactions}</span></a>'
+        )
+    if comments is not None:
+        parts.append(
+            f'<a data-test-id="social-actions__comments" '
+            f'data-num-comments="{comments}">{comments} Comments</a>'
+        )
+    return (
+        '<div class="flex items-center main-feed-activity-card__social-actions">'
+        + "".join(parts)
+        + "</div>"
+    )
+
+
+def _card(reactions: int | None, comments: int | None) -> str:
+    return (
+        '<article class="relative container-lined main-feed-activity-card">'
+        + _social_actions(reactions, comments)
+        + "</article>"
+    )
+
+
+def _related_rail(*cards: str) -> str:
+    items = "".join(f'<li class="mb-1.5"><div class="link-overlay relative">{c}</div></li>'
+                    for c in cards)
+    return (
+        '<section class="core-section-container my-3 related-posts">'
+        f"<ul>{items}</ul></section>"
+    )
+
+
+def _main_section(card: str) -> str:
+    return f'<section class="mb-3"><div class="details">{card}</div></section>'
+
+
+def _page(body: str, comment_count_in_jsonld: int = 0) -> str:
+    """A post page: JSON-LD for the body, markup for the counts."""
+    return f"""
 <html><head>
 <script type="application/ld+json">
-{"@type":"DiscussionForumPosting",
+{{"@type":"DiscussionForumPosting",
  "articleBody":"I shipped it.\\n\\nTwice.\\n\\nHere is the lesson. #BuildInPublic",
  "datePublished":"2026-07-01T10:00:00Z",
- "author":{"name":"Dana Lin","url":"https://linkedin.com/in/danalin","jobTitle":"Founder"},
- "image":{"url":"https://media.licdn.com/x.jpg"}}
+ "comment":[],
+ "commentCount":{comment_count_in_jsonld},
+ "author":{{"name":"Dana Lin","url":"https://linkedin.com/in/danalin","jobTitle":"Founder"}},
+ "image":{{"url":"https://media.licdn.com/x.jpg"}}}}
 </script>
-</head><body>"numLikes":842,"numComments":57</body></html>
+</head><body><main>{body}</main></body></html>
 """
+
+
+JSONLD_PAGE = _page(_main_section(_card(842, 57)))
 
 OG_ONLY_PAGE = """
 <html><head>
@@ -228,12 +285,58 @@ def test_unreadable_metrics_stay_none_not_zero():
 def test_a_partial_metric_still_counts_as_measured():
     """Observed live: a real post exposed its comment count but not its reaction
     count. Keying the basis off reactions alone mislabelled real data."""
-    page = '<html><head><meta property="og:description" content="body text"></head>' \
-           '<body>"numComments":4</body></html>'
-    parsed = parse_post(FetchResult(POST_URL, 200, page, "html"))
+    parsed = parse_post(FetchResult(POST_URL, 200, _page(_main_section(_card(None, 4))), "html"))
     assert parsed.comments == 4
     assert parsed.reactions is None
     assert parsed.metrics_source == "measured"
+
+
+def test_counts_come_from_the_post_not_the_related_posts_rail():
+    """The rail at the foot of the page repeats the identical card markup — up
+    to eleven copies on one live page. Reading the first match in the document
+    reports a stranger's engagement as this post's."""
+    page = _page(_main_section(_card(842, 57)) + _related_rail(_card(3, 1), _card(999, 40)))
+    parsed = parse_post(FetchResult(POST_URL, 200, page, "html"))
+    assert parsed.reactions == 842
+    assert parsed.comments == 57
+
+
+def test_the_rail_is_excluded_by_meaning_not_by_position():
+    """Same assertion with the rail first, so the rule cannot silently decay
+    into 'take the first card' the next time LinkedIn reorders the page."""
+    page = _page(_related_rail(_card(3, 1)) + _main_section(_card(842, 57)))
+    parsed = parse_post(FetchResult(POST_URL, 200, page, "html"))
+    assert parsed.reactions == 842
+    assert parsed.comments == 57
+
+
+def test_jsonld_comment_count_is_ignored_when_it_contradicts_the_page():
+    """Measured on a live post: the page showed 1,113 reactions and 26 comments
+    while its JSON-LD claimed commentCount 0. That block counts the inlined
+    comment[] array, not real comments — six of thirty-two sampled posts were
+    wrong this way, and each was then labelled 'measured'."""
+    page = _page(_main_section(_card(1113, 26)), comment_count_in_jsonld=0)
+    parsed = parse_post(FetchResult(POST_URL, 200, page, "html"))
+    assert parsed.comments == 26
+    assert parsed.reactions == 1113
+
+
+def test_a_post_with_no_social_block_reports_none_not_zero():
+    """LinkedIn omits the block entirely on a post with no engagement. That is
+    probably a genuine zero, but it is an inference about absent markup — and a
+    count we did not read stays None."""
+    page = _page(_main_section('<article class="main-feed-activity-card"></article>'))
+    parsed = parse_post(FetchResult(POST_URL, 200, page, "html"))
+    assert parsed.reactions is None
+    assert parsed.comments is None
+    assert parsed.metrics_source == "inferred"
+
+
+def test_reposts_are_never_reported():
+    """No repost or share count is published on a public post page in any form
+    — 0 of 35 sampled, plain HTTP and headless browser alike."""
+    parsed = parse_post(FetchResult(POST_URL, 200, JSONLD_PAGE, "html"))
+    assert parsed.reposts is None
 
 
 def test_markdown_egress_skips_jsonld_gracefully():
