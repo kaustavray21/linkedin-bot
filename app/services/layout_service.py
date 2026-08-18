@@ -177,6 +177,110 @@ def extract_skeleton(text: str) -> LayoutSkeleton:
     )
 
 
+def _merge_blocks(first: BlockSpec, second: BlockSpec) -> BlockSpec:
+    """Join two adjacent blocks, keeping the gap that followed the second."""
+    return BlockSpec(lines=[*first.lines, *second.lines], blank_after=second.blank_after)
+
+
+def _halve_line(line: LineSpec) -> tuple[LineSpec, LineSpec]:
+    """Divide one line's budget in two, for when every block is a single line.
+
+    The tail keeps the original ending and any emoji, because those describe how
+    the thought finishes. The head gets no `ends_with`: we are inventing a break
+    that the exemplar did not have, and render_template omits the clause entirely
+    rather than inventing punctuation for it.
+    """
+    head_words = max(1, line.words // 2)
+    tail_words = max(1, line.words - head_words)
+    ratio = head_words / max(line.words, 1)
+
+    head = LineSpec(
+        words=head_words,
+        chars=max(1, int(line.chars * ratio)),
+        ends_with="",
+        has_emoji=False,
+        is_list_item=line.is_list_item,
+        is_hashtag_line=False,
+    )
+    tail = LineSpec(
+        words=tail_words,
+        chars=max(1, line.chars - head.chars),
+        ends_with=line.ends_with,
+        has_emoji=line.has_emoji,
+        is_list_item=line.is_list_item,
+        is_hashtag_line=False,
+    )
+    return head, tail
+
+
+def _split_block(block: BlockSpec) -> tuple[BlockSpec, BlockSpec]:
+    """Divide one block in two, preferring an existing line boundary."""
+    if len(block.lines) >= 2:
+        middle = len(block.lines) // 2
+        return (
+            BlockSpec(lines=block.lines[:middle], blank_after=1),
+            BlockSpec(lines=block.lines[middle:], blank_after=block.blank_after),
+        )
+
+    head, tail = _halve_line(block.lines[0])
+    return BlockSpec(lines=[head], blank_after=1), BlockSpec(lines=[tail], blank_after=block.blank_after)
+
+
+def retarget_skeleton(skeleton: LayoutSkeleton, target_blocks: int) -> LayoutSkeleton:
+    """Reshape a skeleton to `target_blocks` content blocks.
+
+    The paragraph control has to be structural. Asking the model in prose for
+    "3 paragraphs" is the same class of instruction this module exists to
+    replace — it drifts, and enforce_layout would then drag the output back to
+    the *exemplar's* block count and undo the request. Retargeting the skeleton
+    first means the template, the prompt and the enforcement all agree on the
+    number the user asked for.
+
+    Merging picks the shortest adjacent pair and splitting divides the longest
+    block, so the reshaping stays as close to the original rhythm as the new
+    count allows. The trailing hashtag block is never counted or touched.
+
+    Returns the skeleton unchanged when the target already matches, and when the
+    exemplar has no prose to redistribute — a request to reshape nothing is a
+    no-op, not a reason to fail the generation that asked for it.
+    """
+    if target_blocks < 1:
+        raise ValueError("A post needs at least one paragraph")
+
+    content = [b for b in skeleton.blocks if not b.is_hashtag_block]
+    trailing = [b for b in skeleton.blocks if b.is_hashtag_block]
+    if not content or len(content) == target_blocks:
+        return skeleton
+
+    blocks = list(content)
+
+    while len(blocks) > target_blocks:
+        shortest = min(
+            range(len(blocks) - 1),
+            key=lambda i: blocks[i].word_total + blocks[i + 1].word_total,
+        )
+        blocks[shortest] = _merge_blocks(blocks[shortest], blocks[shortest + 1])
+        del blocks[shortest + 1]
+
+    while len(blocks) < target_blocks:
+        longest = max(range(len(blocks)), key=lambda i: blocks[i].word_total)
+        head, tail = _split_block(blocks[longest])
+        blocks[longest:longest + 1] = [head, tail]
+
+    reshaped = blocks + trailing
+    return LayoutSkeleton(
+        blocks=reshaped,
+        hook_lines=len(reshaped[0].lines) if reshaped else 0,
+        hashtag_placement=skeleton.hashtag_placement,
+        hashtag_count=skeleton.hashtag_count,
+        emoji_positions=[
+            idx for idx, block in enumerate(reshaped)
+            if any(line.has_emoji for line in block.lines)
+        ],
+        total_words=sum(b.word_total for b in reshaped),
+    )
+
+
 def render_template(skeleton: LayoutSkeleton) -> str:
     """Render the skeleton as an explicit shape for the model to fill.
 

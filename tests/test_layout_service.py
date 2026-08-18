@@ -7,6 +7,7 @@ from app.services.layout_service import (
     enforce_layout,
     extract_skeleton,
     render_template,
+    retarget_skeleton,
 )
 
 PUNCHY = """I failed.
@@ -140,3 +141,90 @@ def test_enforce_never_invents_or_drops_words():
 def test_enforce_handles_empty_input():
     skeleton = extract_skeleton(PUNCHY)
     assert enforce_layout("", skeleton) == ""
+
+
+# ------------------------------------------------------------- retargeting --
+
+def test_retarget_shrinks_to_the_requested_paragraph_count():
+    """PUNCHY has three prose blocks plus a hashtag block."""
+    skeleton = extract_skeleton(PUNCHY)
+    assert len(skeleton.content_blocks) == 3
+
+    retargeted = retarget_skeleton(skeleton, 2)
+    assert len(retargeted.content_blocks) == 2
+
+
+def test_retarget_grows_to_the_requested_paragraph_count():
+    skeleton = extract_skeleton(FLOWING)
+    assert len(skeleton.content_blocks) == 2
+
+    retargeted = retarget_skeleton(skeleton, 4)
+    assert len(retargeted.content_blocks) == 4
+
+
+def test_retarget_leaves_the_hashtag_block_alone():
+    """Hashtags are not a paragraph — asking for two paragraphs must not spend
+    one of them on the tag line, or consume the tag line to reach the count."""
+    skeleton = extract_skeleton(PUNCHY)
+
+    for target in (1, 2, 5):
+        retargeted = retarget_skeleton(skeleton, target)
+        assert len(retargeted.content_blocks) == target
+        assert retargeted.blocks[-1].is_hashtag_block
+        assert retargeted.hashtag_count == 3
+        assert retargeted.hashtag_placement == "trailing_block"
+
+
+def test_retarget_preserves_the_total_word_budget_when_shrinking():
+    """Merging regroups lines; it must not silently change how long the post is."""
+    skeleton = extract_skeleton(FLOWING)
+    retargeted = retarget_skeleton(skeleton, 1)
+    assert retargeted.total_words == skeleton.total_words
+
+
+def test_retarget_can_grow_past_the_available_lines():
+    """Every block is a single line here, so growing has no line boundary to
+    split on and has to divide a line's own budget instead."""
+    skeleton = extract_skeleton("One line only.")
+    assert len(skeleton.content_blocks) == 1
+
+    retargeted = retarget_skeleton(skeleton, 3)
+    assert len(retargeted.content_blocks) == 3
+    assert all(b.word_total >= 1 for b in retargeted.content_blocks)
+
+
+def test_retarget_is_a_no_op_when_the_count_already_matches():
+    skeleton = extract_skeleton(PUNCHY)
+    assert retarget_skeleton(skeleton, 3) is skeleton
+
+
+def test_retarget_rejects_a_zero_paragraph_request():
+    skeleton = extract_skeleton(PUNCHY)
+    with pytest.raises(ValueError):
+        retarget_skeleton(skeleton, 0)
+
+
+def test_retarget_does_not_mutate_the_original():
+    skeleton = extract_skeleton(FLOWING)
+    before = skeleton.to_dict()
+
+    retarget_skeleton(skeleton, 5)
+    assert skeleton.to_dict() == before
+
+
+def test_retargeted_skeleton_drives_enforcement_to_the_same_count():
+    """The reason this function exists: the template, the prompt and the
+    enforcer must agree on the number the user asked for."""
+    skeleton = retarget_skeleton(extract_skeleton(PUNCHY), 2)
+    draft = "Alpha beta gamma. Delta epsilon. Zeta eta theta. Iota kappa.\n\n#One #Two #Three"
+
+    enforced = enforce_layout(draft, skeleton)
+    prose = [b for b in enforced.split("\n\n") if not b.strip().startswith("#")]
+    assert len(prose) == 2
+
+
+def test_retargeted_skeleton_still_renders_a_template():
+    skeleton = retarget_skeleton(extract_skeleton(FLOWING), 4)
+    rendered = render_template(skeleton)
+    assert "Block 4:" in rendered
+    assert "Block 5:" not in rendered
