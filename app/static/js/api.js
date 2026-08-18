@@ -206,22 +206,29 @@ const API = {
     },
 
     // Topic in, draft out — discovery plus remix in one call.
-    async generateFromTopic(topic, notes = '', withImage = true) {
+    // numParagraphs null keeps the exemplar's own paragraph count.
+    async generateFromTopic(topic, notes = '', withImage = true, numParagraphs = null) {
         return this.request('/generate/from-topic', {
             method: 'POST',
-            body: JSON.stringify({ topic, user_notes: notes, with_image: withImage })
+            body: JSON.stringify({
+                topic,
+                user_notes: notes,
+                with_image: withImage,
+                num_paragraphs: numParagraphs
+            })
         });
     },
 
     // Draft a post shaped like one specific discovered post.
-    async remixPost(topic, exemplarId, notes = '', withImage = true) {
+    async remixPost(topic, exemplarId, notes = '', withImage = true, numParagraphs = null) {
         return this.request('/generate/remix', {
             method: 'POST',
             body: JSON.stringify({
                 topic,
                 exemplar_id: exemplarId,
                 user_notes: notes,
-                with_image: withImage
+                with_image: withImage,
+                num_paragraphs: numParagraphs
             })
         });
     },

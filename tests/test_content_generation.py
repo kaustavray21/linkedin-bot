@@ -129,3 +129,74 @@ def test_representative_rejects_empty_set():
         select_representative([])
     with pytest.raises(ValueError):
         select_representative(["   ", ""])
+
+
+# ------------------------------------------------------- paragraph control --
+
+FIVE_BLOCK = """I shipped a product nobody wanted.
+
+It took eight months.
+
+The mistake was obvious afterwards: I never asked a single customer what they needed.
+
+Now I speak to five people before writing any code at all.
+
+That one habit changed how I build everything.
+
+#BuildInPublic #Startups"""
+
+FRESH_DRAFT = (
+    "Alpha one two three. Beta four five six. Gamma seven eight nine. "
+    "Delta ten eleven twelve. Epsilon thirteen fourteen.\n\n#Fresh #Tags"
+)
+
+
+@pytest.mark.asyncio
+async def test_paragraph_count_overrides_the_exemplar_shape():
+    """The plan's check: clone a 5-block exemplar asking for 3, get exactly 3,
+    and the similarity gate still passes."""
+    assert len(extract_skeleton(FIVE_BLOCK).content_blocks) == 5
+
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    text, report = await generate_with_layout(
+        topic="shipping", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        num_paragraphs=3, ai_service=ai,
+    )
+
+    prose = [b for b in text.split("\n\n") if not b.strip().startswith("#")]
+    assert len(prose) == 3
+    assert report.passed
+
+
+@pytest.mark.asyncio
+async def test_omitting_the_paragraph_count_keeps_the_exemplar_shape():
+    """Cloning a post's structure is the default; the control is the exception."""
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    text, _ = await generate_with_layout(
+        topic="shipping", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        ai_service=ai,
+    )
+
+    prose = [b for b in text.split("\n\n") if not b.strip().startswith("#")]
+    assert len(prose) == 5
+
+
+@pytest.mark.asyncio
+async def test_the_prompt_asks_for_the_retargeted_count_too():
+    """Prompt and enforcement must agree. If the template still described five
+    blocks, the model would be asked for one shape and corrected into another."""
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    await generate_with_layout(
+        topic="shipping", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        num_paragraphs=2, ai_service=ai,
+    )
+
+    prompt = ai.generate_with_gemini.await_args_list[0][0][0]
+    assert "Block 3:" in prompt      # 2 prose blocks + the hashtag block
+    assert "Block 4:" not in prompt

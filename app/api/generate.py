@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.connection import get_session
@@ -178,6 +178,9 @@ class RemixRequest(BaseModel):
     user_notes: str | None = ""
     with_image: bool = True
     variation_index: int = 0
+    # None keeps the exemplar's own paragraph count, which is the default a
+    # clone should have. The bound matches the control in the UI.
+    num_paragraphs: int | None = Field(default=None, ge=1, le=10)
 
 
 class FromTopicRequest(BaseModel):
@@ -186,6 +189,7 @@ class FromTopicRequest(BaseModel):
     limit: int = 8
     with_image: bool = True
     provider: str | None = None
+    num_paragraphs: int | None = Field(default=None, ge=1, le=10)
 
 
 class RemixResponse(BaseModel):
@@ -242,6 +246,7 @@ async def generate_from_topic_endpoint(
             with_image=body.with_image,
             provider_name=body.provider,
             user_id=user_id,
+            num_paragraphs=body.num_paragraphs,
         )
     except ValueError as e:
         # Expected outcomes — nothing discoverable, or nothing original enough.
@@ -275,6 +280,7 @@ async def remix_endpoint(
             user_notes=body.user_notes or "",
             with_image=body.with_image,
             variation_index=body.variation_index,
+            num_paragraphs=body.num_paragraphs,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

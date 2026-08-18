@@ -32,6 +32,7 @@ from app.services.layout_service import (
     enforce_layout,
     extract_skeleton,
     render_template,
+    retarget_skeleton,
 )
 from app.services.hashtag_service import strip_trailing_hashtag_block
 from app.services.similarity_service import SimilarityReport, check_similarity
@@ -161,6 +162,7 @@ async def generate_with_layout(
     hook_style: str | None = None,
     word_type: str | None = None,
     variation_index: int = 0,
+    num_paragraphs: int | None = None,
     ai_service: AIService | None = None,
 ) -> tuple[str, SimilarityReport]:
     """Generate one post cloned from `exemplar`'s structure.
@@ -169,8 +171,15 @@ async def generate_with_layout(
     than shipping something too close to the source. Returning the report — not
     just the text — is deliberate: the caller surfaces the score so the
     threshold gets tuned against real output instead of guessed at.
+
+    `num_paragraphs` reshapes the skeleton before it is rendered into the prompt,
+    so the template the model is given and the enforcement applied afterwards ask
+    for the same count. Requesting it in prose instead would leave enforce_layout
+    still holding the exemplar's own block count and silently undo it.
     """
     skeleton = extract_skeleton(exemplar)
+    if num_paragraphs is not None:
+        skeleton = retarget_skeleton(skeleton, num_paragraphs)
     style = style or extract_style_profile([exemplar])
     ai = ai_service or AIService(provider="gemini")
 

@@ -128,8 +128,13 @@ async def remix_from_post(
     user_notes: str = "",
     with_image: bool = True,
     variation_index: int = 0,
+    num_paragraphs: int | None = None,
 ) -> RemixResult:
-    """Build a draft shaped like `exemplar`, about `topic`."""
+    """Build a draft shaped like `exemplar`, about `topic`.
+
+    `num_paragraphs` overrides how many blocks the clone has. None keeps the
+    exemplar's own count, which is the point of cloning it in the first place.
+    """
     source_text = exemplar.content_text or ""
     if not source_text.strip():
         raise ValueError("That post has no readable text, so its structure cannot be cloned")
@@ -142,6 +147,7 @@ async def remix_from_post(
         user_notes=user_notes,
         style=style,
         variation_index=variation_index,
+        num_paragraphs=num_paragraphs,
     )
 
     source_tags = exemplar.hashtags or extract_tags(source_text)
@@ -178,6 +184,7 @@ async def generate_from_topic(
     with_image: bool = True,
     provider_name: str | None = None,
     user_id: int | None = None,
+    num_paragraphs: int | None = None,
 ) -> RemixResult:
     """Topic in, draft out. Discovers first, then remixes the best result.
 
@@ -214,6 +221,7 @@ async def generate_from_topic(
     result = await remix_from_post(
         db=db, topic=topic, exemplar=exemplar,
         user_notes=user_notes, with_image=with_image,
+        num_paragraphs=num_paragraphs,
     )
     result.notes = notes + result.notes
     return result
