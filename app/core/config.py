@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     similarity_max_word_run: int = 8
     similarity_max_retries: int = 2
 
+    # Post-type taxonomy — the anti-explosion knobs. The taxonomy registers
+    # types a model coined without asking, so these bound how fast it can grow.
+    # Above the snap threshold a proposal folds into the existing type instead
+    # of becoming a new row; past the brake the threshold drops, making it
+    # harder to coin anything new; the decay window is what a merge pass uses to
+    # find one-off coinages.
+    post_type_snap_threshold: float = 0.6
+    post_type_growth_brake: int = 20
+    post_type_brake_snap_threshold: float = 0.4
+    post_type_decay_days: int = 90
+
     # Discovery — provider selection
     discovery_provider: str = "ddg"          # ddg | searxng | manual
     searxng_url: str = "http://localhost:8080"
