@@ -203,6 +203,46 @@ class DraftLineage(Base):
     used_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class PostMetric(Base):
+    """One reading of how a published post is performing.
+
+    A time series, not a snapshot, and that is the whole point: a single current
+    number cannot tell a post that died in six hours from one still climbing on
+    day seven, and that difference is most of the signal the feedback loop is
+    trying to learn from.
+
+    `age_hours` is stored rather than derived at read time so readings stay
+    comparable across posts published at different times of day — the question
+    is always "how was it doing N hours in", never "what did the clock say".
+
+    Reactions and comments come from the post's own public page, through the
+    same fetcher and parser Discovery uses; no additional LinkedIn scope is
+    needed for them. Impressions and reposts are only available through the
+    member analytics API, which needs `r_member_postAnalytics` and re-consent,
+    so they stay NULL until that is granted. NULL means "not measured" here as
+    everywhere else — never zero.
+    """
+
+    __tablename__ = "post_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("posts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    captured_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    age_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    reactions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    comments: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    impressions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reposts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # public_page | member_api — which route produced this reading, so a series
+    # that changes source partway through can still be read honestly.
+    source: Mapped[str] = mapped_column(String(20), default="public_page", nullable=False)
+
+
 class PostType(Base):
     """A kind of post — `story`, `contrarian`, and whatever the model coins next.
 
