@@ -111,6 +111,7 @@ def build_prompt(
     hook_style: str | None = None,
     word_type: str | None = None,
     post_type: dict | None = None,
+    research: str | None = None,
     variation_index: int = 0,
 ) -> str:
     chosen_hook = hook_style if (hook_style and hook_style != "auto") else style.hook_style
@@ -151,6 +152,20 @@ def build_prompt(
     # taxonomy's own label and description rather than a bare slug, because a
     # slug like `case_study` tells the model less than the sentence the
     # taxonomy already stores to define it.
+    # Findings before instructions. The model is told to draw on them and to
+    # leave alone anything they do not support — research that quietly licenses
+    # invention is worse than none, because the post then reads as sourced. The
+    # bracketed markers come through from research_service so a claim in the
+    # draft can be traced back to the page it came from.
+    if research and research.strip():
+        prompt += (
+            "\n\nResearch findings on this topic, gathered from the web just now:\n"
+            f"{research.strip()}\n"
+            "Draw on these where they are relevant, and keep the bracketed source "
+            "markers on any claim you take from them. Do not treat them as "
+            "permission to assert anything they do not say."
+        )
+
     if post_type and post_type.get("label"):
         described = post_type["label"]
         if post_type.get("description"):
@@ -173,6 +188,7 @@ async def generate_with_layout(
     hook_style: str | None = None,
     word_type: str | None = None,
     post_type: dict | None = None,
+    research: str | None = None,
     variation_index: int = 0,
     num_paragraphs: int | None = None,
     ai_service: AIService | None = None,
@@ -204,6 +220,7 @@ async def generate_with_layout(
         hook_style=hook_style,
         word_type=word_type,
         post_type=post_type,
+        research=research,
         variation_index=variation_index,
     )
 

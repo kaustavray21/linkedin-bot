@@ -183,6 +183,10 @@ class RemixRequest(BaseModel):
     num_paragraphs: int | None = Field(default=None, ge=1, le=10)
     # None keeps however the exemplar itself was classified.
     post_type_slug: str | None = None
+    # Notes from a Deep Think run. The client sends them so the research and the
+    # generation stay separate calls — the user sees the findings before the
+    # draft is written, rather than after.
+    research: str | None = None
 
 
 class FromTopicRequest(BaseModel):
@@ -193,6 +197,10 @@ class FromTopicRequest(BaseModel):
     provider: str | None = None
     num_paragraphs: int | None = Field(default=None, ge=1, le=10)
     post_type_slug: str | None = None
+    # Notes from a Deep Think run. The client sends them so the research and the
+    # generation stay separate calls — the user sees the findings before the
+    # draft is written, rather than after.
+    research: str | None = None
 
 
 class RemixResponse(BaseModel):
@@ -251,6 +259,7 @@ async def generate_from_topic_endpoint(
             user_id=user_id,
             num_paragraphs=body.num_paragraphs,
             post_type_slug=body.post_type_slug,
+            research=body.research,
         )
     except ValueError as e:
         # Expected outcomes — nothing discoverable, or nothing original enough.
@@ -286,6 +295,7 @@ async def remix_endpoint(
             variation_index=body.variation_index,
             num_paragraphs=body.num_paragraphs,
             post_type_slug=body.post_type_slug,
+            research=body.research,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

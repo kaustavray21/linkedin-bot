@@ -151,6 +151,7 @@ async def remix_from_post(
     variation_index: int = 0,
     num_paragraphs: int | None = None,
     post_type_slug: str | None = None,
+    research: str | None = None,
 ) -> RemixResult:
     """Build a draft shaped like `exemplar`, about `topic`.
 
@@ -178,6 +179,7 @@ async def remix_from_post(
         variation_index=variation_index,
         num_paragraphs=num_paragraphs,
         post_type=post_type,
+        research=research,
     )
 
     source_tags = exemplar.hashtags or extract_tags(source_text)
@@ -216,6 +218,7 @@ async def generate_from_topic(
     user_id: int | None = None,
     num_paragraphs: int | None = None,
     post_type_slug: str | None = None,
+    research: str | None = None,
 ) -> RemixResult:
     """Topic in, draft out. Discovers first, then remixes the best result.
 
@@ -253,6 +256,7 @@ async def generate_from_topic(
         db=db, topic=topic, exemplar=exemplar,
         user_notes=user_notes, with_image=with_image,
         num_paragraphs=num_paragraphs, post_type_slug=post_type_slug,
+        research=research,
     )
     result.notes = notes + result.notes
     return result

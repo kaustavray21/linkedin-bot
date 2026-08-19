@@ -235,3 +235,40 @@ async def test_no_post_type_adds_no_instruction():
 
     prompt = ai.generate_with_gemini.await_args_list[0][0][0]
     assert "specific kind of post" not in prompt
+
+
+# ---------------------------------------------------------------- research --
+
+@pytest.mark.asyncio
+async def test_research_findings_reach_the_prompt_with_their_markers():
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    await generate_with_layout(
+        topic="kubernetes", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        research="- adoption rose 27% among mid sized teams [1]",
+        ai_service=ai,
+    )
+
+    prompt = ai.generate_with_gemini.await_args_list[0][0][0]
+    assert "adoption rose 27%" in prompt
+    assert "[1]" in prompt
+    # Research must not read as licence to assert beyond it.
+    assert "Do not treat them as permission to assert anything they do not say" in prompt
+
+
+@pytest.mark.asyncio
+async def test_without_research_the_prompt_is_unchanged():
+    """Deep Think off must leave generation byte-identical to before it existed."""
+    style = extract_style_profile([FIVE_BLOCK])
+
+    a = AsyncMock(); a.generate_with_gemini.return_value = FRESH_DRAFT
+    await generate_with_layout(topic="k", exemplar=FIVE_BLOCK, style=style, ai_service=a)
+
+    b = AsyncMock(); b.generate_with_gemini.return_value = FRESH_DRAFT
+    await generate_with_layout(topic="k", exemplar=FIVE_BLOCK, style=style,
+                               research="", ai_service=b)
+
+    assert a.generate_with_gemini.await_args_list[0][0][0] == \
+           b.generate_with_gemini.await_args_list[0][0][0]
+    assert "Research findings" not in a.generate_with_gemini.await_args_list[0][0][0]
