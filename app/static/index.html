@@ -346,6 +346,19 @@
                                                       list reflects the database and can legitimately be empty. -->
                                                  <exemplar-picker></exemplar-picker>
 
+                                                 <!-- Which kind of post to write. Defaults to however
+                                                      the chosen exemplar was classified, because cloning
+                                                      a post should reproduce its kind unless asked
+                                                      otherwise. Hidden until an exemplar is chosen — it
+                                                      only steers the exemplar path. -->
+                                                 <div class="form-group hidden" id="post-type-group"
+                                                      style="display: flex; flex-direction: column; gap: 6px;">
+                                                     <label for="create-post-type" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Post type</label>
+                                                     <select id="create-post-type" class="form-control">
+                                                         <option value="">Same as the chosen post</option>
+                                                     </select>
+                                                 </div>
+
                                                  <!-- Notes Field -->
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
                                                      <label for="create-notes-input" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Your Specific Examples / Notes (Optional)</label>

@@ -126,6 +126,71 @@ async function testOpeningTheBrowserLoadsTheOptions() {
     equal('the options reach the picker', picker.posts.length, 2);
 }
 
+async function testGenerateDraftClonesTheChosenPost() {
+    const calls = [];
+    const { app, el, sel } = boot({
+        remixPost: async (...args) => {
+            calls.push(args);
+            // Mirrors RemixResponse, nulls included — the real endpoint always
+            // sends every key.
+            return { text: 'cloned', full_text: 'cloned', hashtags: [], notes: [],
+                     image_url: null, image_style_note: null,
+                     exemplar_id: 5, exemplar_url: null, exemplar_author: null,
+                     similarity_jaccard: null, similarity_longest_run: null,
+                     similarity_band: null };
+        },
+        generateText: async () => { throw new Error('the plain path must not run'); },
+        generateStyledImage: async () => ({ image_url: null }),
+        listPostTypes: async () => [{ slug: 'story', label: 'Story' }],
+    });
+
+    select(sel('exemplar-picker'), POSTS[0]);
+    el('ai-text-prompt').value = 'shipping';
+    el('create-para-count').value = '3';
+    el('create-post-type').value = 'story';
+
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle(); await settle();
+
+    equal('the exemplar path was used', calls.length, 1);
+    const [topic, exemplarId, notes, withImage, numParagraphs, postType] = calls[0];
+    equal('the topic is passed', topic, 'shipping');
+    equal('the chosen exemplar is passed', exemplarId, 5);
+    check('the image is deferred to stage two', withImage === false);
+    equal('the paragraph count is passed', numParagraphs, 3);
+    equal('the chosen post type is passed', postType, 'story');
+}
+
+async function testWithoutAnExemplarThePlainPathStillWorks() {
+    let plain = 0;
+    const { el } = boot({
+        generateText: async () => { plain += 1; return { content: 'a plain draft' }; },
+        remixPost: async () => { throw new Error('the exemplar path must not run'); },
+    });
+
+    el('ai-text-prompt').value = 'shipping';
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle();
+
+    // Discovery can legitimately have found nothing yet, so this path stays.
+    equal('the plain generator ran', plain, 1);
+}
+
+async function testTheTypeControlAppearsWithTheExemplar() {
+    const { app, el, sel } = boot({ listPostTypes: async () => [{ slug: 'story', label: 'Story' }] });
+    const group = el('post-type-group');
+
+    // The stub has no markup, so the starting class comes from the app rather
+    // than from index.html — establish it the way startNewPost() does.
+    app.setExemplar(null);
+    check('hidden with no exemplar', group.hidden);
+    select(sel('exemplar-picker'), POSTS[0]);
+    check('shown once an exemplar is chosen', !group.hidden);
+
+    app.setExemplar(null);
+    check('hidden again when cleared', group.hidden);
+}
+
 const run = async () => {
     await testSelectingAnExemplarBindsItToTheDraft();
     await testTheSelectionMakesTheDraftDirty();
@@ -133,6 +198,9 @@ const run = async () => {
     await testTheSelectionSurvivesARoundTrip();
     await testThePickerIsToldAboutEveryExemplarChange();
     await testOpeningTheBrowserLoadsTheOptions();
+    await testGenerateDraftClonesTheChosenPost();
+    await testWithoutAnExemplarThePlainPathStillWorks();
+    await testTheTypeControlAppearsWithTheExemplar();
     report('P4 exemplar picker');
 };
 

@@ -121,6 +121,27 @@ async def generate_style_matched_image(
     return image_url, style_note
 
 
+async def _describe_post_type(db: AsyncSession, slug: str | None) -> dict | None:
+    """The taxonomy's own words for a type, for the prompt to use.
+
+    Returns None for an unknown or retired slug rather than raising. A type can
+    be merged away between a draft being set up and generated, and refusing the
+    generation over it would cost the user work for a bookkeeping change they
+    did not make.
+    """
+    if not slug:
+        return None
+
+    from app.database.models import PostType
+
+    row = (
+        await db.execute(select(PostType).where(PostType.slug == slug))
+    ).scalar_one_or_none()
+    if row is None or not row.active:
+        return None
+    return {"slug": row.slug, "label": row.label, "description": row.description}
+
+
 async def remix_from_post(
     db: AsyncSession,
     topic: str,
@@ -129,6 +150,7 @@ async def remix_from_post(
     with_image: bool = True,
     variation_index: int = 0,
     num_paragraphs: int | None = None,
+    post_type_slug: str | None = None,
 ) -> RemixResult:
     """Build a draft shaped like `exemplar`, about `topic`.
 
@@ -141,6 +163,13 @@ async def remix_from_post(
 
     style = extract_style_profile([source_text])
 
+    # Default to however the exemplar itself was classified: cloning a post
+    # should reproduce its kind unless asked otherwise. An unknown slug is
+    # ignored rather than rejected — a merged-away type must not fail a
+    # generation the user has already waited for.
+    chosen_slug = post_type_slug or exemplar.post_type_slug
+    post_type = await _describe_post_type(db, chosen_slug)
+
     text, report = await generate_with_layout(
         topic=topic,
         exemplar=source_text,
@@ -148,6 +177,7 @@ async def remix_from_post(
         style=style,
         variation_index=variation_index,
         num_paragraphs=num_paragraphs,
+        post_type=post_type,
     )
 
     source_tags = exemplar.hashtags or extract_tags(source_text)
@@ -185,6 +215,7 @@ async def generate_from_topic(
     provider_name: str | None = None,
     user_id: int | None = None,
     num_paragraphs: int | None = None,
+    post_type_slug: str | None = None,
 ) -> RemixResult:
     """Topic in, draft out. Discovers first, then remixes the best result.
 
@@ -221,7 +252,7 @@ async def generate_from_topic(
     result = await remix_from_post(
         db=db, topic=topic, exemplar=exemplar,
         user_notes=user_notes, with_image=with_image,
-        num_paragraphs=num_paragraphs,
+        num_paragraphs=num_paragraphs, post_type_slug=post_type_slug,
     )
     result.notes = notes + result.notes
     return result

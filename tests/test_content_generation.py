@@ -200,3 +200,38 @@ async def test_the_prompt_asks_for_the_retargeted_count_too():
     prompt = ai.generate_with_gemini.await_args_list[0][0][0]
     assert "Block 3:" in prompt      # 2 prose blocks + the hashtag block
     assert "Block 4:" not in prompt
+
+
+# --------------------------------------------------------- post type steering --
+
+@pytest.mark.asyncio
+async def test_the_post_type_reaches_the_prompt_in_the_taxonomys_own_words():
+    """A bare slug like `case_study` tells the model less than the sentence the
+    taxonomy already stores to define it, so the description goes too."""
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    await generate_with_layout(
+        topic="shipping", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        post_type={"slug": "case_study", "label": "Case study",
+                   "description": "Walks through a specific situation and its outcome"},
+        ai_service=ai,
+    )
+
+    prompt = ai.generate_with_gemini.await_args_list[0][0][0]
+    assert "Case study" in prompt
+    assert "specific situation and its outcome" in prompt
+
+
+@pytest.mark.asyncio
+async def test_no_post_type_adds_no_instruction():
+    ai = AsyncMock()
+    ai.generate_with_gemini.return_value = FRESH_DRAFT
+
+    await generate_with_layout(
+        topic="shipping", exemplar=FIVE_BLOCK, style=extract_style_profile([FIVE_BLOCK]),
+        ai_service=ai,
+    )
+
+    prompt = ai.generate_with_gemini.await_args_list[0][0][0]
+    assert "specific kind of post" not in prompt

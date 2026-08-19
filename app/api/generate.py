@@ -181,6 +181,8 @@ class RemixRequest(BaseModel):
     # None keeps the exemplar's own paragraph count, which is the default a
     # clone should have. The bound matches the control in the UI.
     num_paragraphs: int | None = Field(default=None, ge=1, le=10)
+    # None keeps however the exemplar itself was classified.
+    post_type_slug: str | None = None
 
 
 class FromTopicRequest(BaseModel):
@@ -190,6 +192,7 @@ class FromTopicRequest(BaseModel):
     with_image: bool = True
     provider: str | None = None
     num_paragraphs: int | None = Field(default=None, ge=1, le=10)
+    post_type_slug: str | None = None
 
 
 class RemixResponse(BaseModel):
@@ -247,6 +250,7 @@ async def generate_from_topic_endpoint(
             provider_name=body.provider,
             user_id=user_id,
             num_paragraphs=body.num_paragraphs,
+            post_type_slug=body.post_type_slug,
         )
     except ValueError as e:
         # Expected outcomes — nothing discoverable, or nothing original enough.
@@ -281,6 +285,7 @@ async def remix_endpoint(
             with_image=body.with_image,
             variation_index=body.variation_index,
             num_paragraphs=body.num_paragraphs,
+            post_type_slug=body.post_type_slug,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

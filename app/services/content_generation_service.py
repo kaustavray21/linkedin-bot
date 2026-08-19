@@ -110,6 +110,7 @@ def build_prompt(
     skeleton: LayoutSkeleton,
     hook_style: str | None = None,
     word_type: str | None = None,
+    post_type: dict | None = None,
     variation_index: int = 0,
 ) -> str:
     chosen_hook = hook_style if (hook_style and hook_style != "auto") else style.hook_style
@@ -146,6 +147,16 @@ def build_prompt(
     if word_type and word_type in vocabulary:
         prompt += f"\n\n{vocabulary[word_type]}"
 
+    # The post type names the KIND of post to write. It is passed as the
+    # taxonomy's own label and description rather than a bare slug, because a
+    # slug like `case_study` tells the model less than the sentence the
+    # taxonomy already stores to define it.
+    if post_type and post_type.get("label"):
+        described = post_type["label"]
+        if post_type.get("description"):
+            described += f" — {post_type['description']}"
+        prompt += f"\n\nWrite this as a specific kind of post: {described}"
+
     if variation_index == 1:
         prompt += "\n\nAngle: lead with data — stats, metrics, concrete numbers."
     elif variation_index == 2:
@@ -161,6 +172,7 @@ async def generate_with_layout(
     style=None,
     hook_style: str | None = None,
     word_type: str | None = None,
+    post_type: dict | None = None,
     variation_index: int = 0,
     num_paragraphs: int | None = None,
     ai_service: AIService | None = None,
@@ -191,6 +203,7 @@ async def generate_with_layout(
         skeleton=skeleton,
         hook_style=hook_style,
         word_type=word_type,
+        post_type=post_type,
         variation_index=variation_index,
     )
 

@@ -619,6 +619,38 @@ class App {
                 author: this.exemplarAuthor,
             });
         }
+
+        // The type control only steers the exemplar path, so it appears with an
+        // exemplar and goes away with it.
+        document.getElementById('post-type-group')
+            .classList.toggle('hidden', !this.exemplarId);
+        if (this.exemplarId) this.loadPostTypeOptions();
+    }
+
+    // Fills the post-type select. "Same as the chosen post" stays the default:
+    // cloning a post should reproduce its kind unless the user overrides it.
+    async loadPostTypeOptions() {
+        const select = document.getElementById('create-post-type');
+        if (this.postTypeOptions) return;
+
+        let options;
+        try {
+            options = await API.listPostTypes();
+        } catch (error) {
+            options = null;
+        }
+        // A missing or malformed list leaves the default option, which the
+        // backend reads as "keep the exemplar's own type" — the control degrades
+        // to the behaviour it already had rather than blocking generation.
+        if (!Array.isArray(options)) return;
+        this.postTypeOptions = options;
+
+        const chosen = select.value;
+        select.innerHTML = '<option value="">Same as the chosen post</option>'
+            + this.postTypeOptions.map(t =>
+                `<option value="${this.escapeHtml(t.slug)}">${this.escapeHtml(t.label)}</option>`
+            ).join('');
+        select.value = chosen;
     }
 
     // The exemplar list, fetched when the picker is opened. History rather than
@@ -722,7 +754,11 @@ class App {
         this.refreshRail();
 
         const band = result.similarity_band || 'unknown';
-        const overlap = result.similarity_jaccard !== null
+        // Loose != on purpose: it covers a missing key as well as an explicit
+        // null. The response always carries the field today, but a strict check
+        // turns any future shape change into a crash in the middle of handing
+        // over a finished draft.
+        const overlap = result.similarity_jaccard != null
             ? ` (overlap ${result.similarity_jaccard.toFixed(3)})`
             : '';
         this.showToast(
@@ -835,11 +871,10 @@ class App {
             }
         });
 
-        // Generate AI Text Draft.
-        //
-        // Interim state: the styled path went out with the reference subsystem
-        // and the discovery-exemplar path arrives in P4. Until then this is the
-        // plain generator, which never depended on references.
+        // Generate AI Text Draft. Two paths, chosen by whether an exemplar is
+        // selected: cloning a discovered post's structure, or a plain draft from
+        // the topic alone. The plain path stays because Discovery can
+        // legitimately have found nothing yet.
         document.getElementById('btn-generate-text').addEventListener('click', async () => {
             const promptInput = document.getElementById('ai-text-prompt');
             const prompt = promptInput.value.trim();
@@ -849,11 +884,34 @@ class App {
             }
 
             const btn = document.getElementById('btn-generate-text');
-            this.setButtonLoading(btn, true);
-
             const paraVal = document.getElementById('create-para-count').value.trim();
             const numParagraphs = paraVal === '' ? null : parseInt(paraVal);
+            const notes = document.getElementById('create-notes-input').value.trim();
 
+            if (this.exemplarId) {
+                // with_image=false: the image is stage 2, built from the text
+                // this call returns. Asking for both at once folds the two waits
+                // into one and undoes the staged handoff.
+                // Captured BEFORE the handoff starts. runStagedHandoff opens with
+                // startNewPost(), which clears the editor — including the
+                // exemplar — so a thunk reading this.exemplarId lazily would send
+                // null and be rejected. The Discover-tab path never hit this
+                // because it already closes over the post it was clicked on.
+                const exemplarId = this.exemplarId;
+                const postType = document.getElementById('create-post-type').value || null;
+
+                this.setButtonLoading(btn, true);
+                try {
+                    await this.runStagedHandoff(() => API.remixPost(
+                        prompt, exemplarId, notes, false, numParagraphs, postType,
+                    ));
+                } finally {
+                    this.setButtonLoading(btn, false);
+                }
+                return;
+            }
+
+            this.setButtonLoading(btn, true);
             try {
                 const response = await API.generateText(prompt, null, numParagraphs);
                 textarea.value = response.content;
@@ -1325,6 +1383,7 @@ class App {
             hookStyle: value('create-hook-style'),
             rhythm: value('create-rhythm'),
             wordType: value('create-word-type'),
+            postType: value('create-post-type'),
             exemplarId: this.exemplarId ?? null,
             exemplarUrl: this.exemplarUrl ?? null,
             exemplarAuthor: this.exemplarAuthor ?? null,
@@ -1362,6 +1421,7 @@ class App {
         set('create-hook-style', state.hookStyle);
         set('create-rhythm', state.rhythm);
         set('create-word-type', state.wordType);
+        set('create-post-type', state.postType);
 
         this.setExemplar(state.exemplarId, state.exemplarUrl, state.exemplarAuthor);
 

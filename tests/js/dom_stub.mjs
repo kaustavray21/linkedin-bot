@@ -151,8 +151,8 @@ export function hashtagEditorStub() {
  */
 const POST_FORM_CONTROLS = [
     '#post-text-content', '#ai-text-prompt', '#create-notes-input', '#create-para-count',
-    '#create-hook-style', '#create-rhythm', '#create-word-type', '#post-scheduled-time',
-    '#generated-image-url',
+    '#create-hook-style', '#create-rhythm', '#create-word-type', '#create-post-type',
+    '#post-scheduled-time', '#generated-image-url',
 ];
 
 export function postFormStub() {

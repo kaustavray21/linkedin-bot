@@ -256,3 +256,99 @@ def test_stripping_removes_multiple_trailing_tag_blocks():
 
     text = "Body.\n\n#One #Two\n\n#Three"
     assert strip_trailing_hashtag_block(text) == "Body."
+
+
+# ------------------------------------------------------ exemplar post types --
+
+@pytest.mark.asyncio
+async def test_remix_defaults_to_the_exemplars_own_type(db_session, monkeypatch):
+    """Cloning a post should reproduce its kind unless asked otherwise."""
+    from app.database.models import DiscoveredPost, PostType
+    from app.services.remix_service import remix_from_post
+
+    db_session.add(PostType(slug="story", label="Story",
+                            description="A personal narrative with a turn", origin="seed"))
+    exemplar = DiscoveredPost(
+        keyword="k", source="s", post_url="https://example.com/p",
+        content_text="I shipped it.\n\nTwice.\n\nHere is the lesson learned.",
+        post_type_slug="story",
+    )
+    db_session.add(exemplar)
+    await db_session.flush()
+
+    seen = {}
+
+    async def fake_generate(**kwargs):
+        seen.update(kwargs)
+        return "A brand new draft entirely.", None
+
+    monkeypatch.setattr("app.services.remix_service.generate_with_layout", fake_generate)
+    monkeypatch.setattr("app.services.remix_service.remix_hashtags", AsyncMock(return_value=[]))
+
+    await remix_from_post(db=db_session, topic="shipping", exemplar=exemplar, with_image=False)
+
+    assert seen["post_type"]["slug"] == "story"
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_type_overrides_the_exemplars(db_session, monkeypatch):
+    from app.database.models import DiscoveredPost, PostType
+    from app.services.remix_service import remix_from_post
+
+    for slug in ("story", "listicle"):
+        db_session.add(PostType(slug=slug, label=slug.title(), description=f"the {slug}",
+                                origin="seed"))
+    exemplar = DiscoveredPost(
+        keyword="k", source="s", post_url="https://example.com/q",
+        content_text="I shipped it.\n\nTwice.\n\nHere is the lesson learned.",
+        post_type_slug="story",
+    )
+    db_session.add(exemplar)
+    await db_session.flush()
+
+    seen = {}
+
+    async def fake_generate(**kwargs):
+        seen.update(kwargs)
+        return "A brand new draft entirely.", None
+
+    monkeypatch.setattr("app.services.remix_service.generate_with_layout", fake_generate)
+    monkeypatch.setattr("app.services.remix_service.remix_hashtags", AsyncMock(return_value=[]))
+
+    await remix_from_post(db=db_session, topic="shipping", exemplar=exemplar,
+                          with_image=False, post_type_slug="listicle")
+
+    assert seen["post_type"]["slug"] == "listicle"
+
+
+@pytest.mark.asyncio
+async def test_a_merged_away_type_does_not_fail_the_generation(db_session, monkeypatch):
+    """A type can be retired between a draft being set up and generated. Losing
+    the draft over a bookkeeping change the user did not make is the wrong trade."""
+    from app.database.models import DiscoveredPost, PostType
+    from app.services.remix_service import remix_from_post
+
+    db_session.add(PostType(slug="gone", label="Gone", description="retired",
+                            origin="ai", active=False))
+    exemplar = DiscoveredPost(
+        keyword="k", source="s", post_url="https://example.com/r",
+        content_text="I shipped it.\n\nTwice.\n\nHere is the lesson learned.",
+        post_type_slug="gone",
+    )
+    db_session.add(exemplar)
+    await db_session.flush()
+
+    seen = {}
+
+    async def fake_generate(**kwargs):
+        seen.update(kwargs)
+        return "A brand new draft entirely.", None
+
+    monkeypatch.setattr("app.services.remix_service.generate_with_layout", fake_generate)
+    monkeypatch.setattr("app.services.remix_service.remix_hashtags", AsyncMock(return_value=[]))
+
+    result = await remix_from_post(db=db_session, topic="shipping", exemplar=exemplar,
+                                   with_image=False)
+
+    assert seen["post_type"] is None
+    assert result.text

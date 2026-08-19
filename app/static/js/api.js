@@ -220,7 +220,9 @@ const API = {
     },
 
     // Draft a post shaped like one specific discovered post.
-    async remixPost(topic, exemplarId, notes = '', withImage = true, numParagraphs = null) {
+    // postTypeSlug null keeps however the exemplar itself was classified.
+    async remixPost(topic, exemplarId, notes = '', withImage = true,
+                    numParagraphs = null, postTypeSlug = null) {
         return this.request('/generate/remix', {
             method: 'POST',
             body: JSON.stringify({
@@ -228,7 +230,8 @@ const API = {
                 exemplar_id: exemplarId,
                 user_notes: notes,
                 with_image: withImage,
-                num_paragraphs: numParagraphs
+                num_paragraphs: numParagraphs,
+                post_type_slug: postTypeSlug
             })
         });
     },
