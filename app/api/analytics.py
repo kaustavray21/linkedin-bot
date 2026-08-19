@@ -72,7 +72,11 @@ async def list_outcomes(user_id: int, db: AsyncSession = Depends(get_session)):
         await db.execute(
             select(Post)
             .where(Post.user_id == user_id, Post.status == "published")
-            .order_by(Post.published_time.desc().nullslast())
+            # NOT .nullslast(): that emits PostgreSQL's NULLS LAST, which MySQL
+            # rejects outright with error 1064. `IS NULL` yields 0 for a row that
+            # has a date and 1 for one that does not, so ascending on it puts
+            # dated rows first and undated last on every dialect.
+            .order_by(Post.published_time.is_(None), Post.published_time.desc())
         )
     ).scalars().all()
 
