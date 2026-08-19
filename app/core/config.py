@@ -111,6 +111,17 @@ class Settings(BaseSettings):
     # Discovery — retention
     discovery_retention_days: int = 30
 
+    # Own-post metrics — how published posts are performing over time.
+    # Read from each post's own public page, so this spends no LinkedIn API
+    # quota and needs no extra scope. The cap and interval exist because
+    # "refresh on restart" turns a crash loop into a request storm.
+    metrics_enabled: bool = True
+    metrics_refresh_interval_hours: int = 24
+    metrics_daily_capture_cap: int = 100
+    # Engagement has effectively settled by then, and re-reading a post forever
+    # spends requests to learn nothing.
+    metrics_capture_window_days: int = 30
+
     # Discovery — classify every fetched post into a post type. One model call
     # per post, run concurrently across each fetch wave. Turn it off to keep a
     # search to its network cost alone; stored posts then carry no type.
