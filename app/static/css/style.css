@@ -502,7 +502,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .content-body {
-    padding: 40px;
+    /* Asymmetric on purpose. The vertical 40px is breathing room between the
+       top bar and the content; the horizontal 40px was competing with the
+       editor for width, and the create workspace is the widest thing the app
+       renders. 28 still reads as a margin rather than a flush edge.
+       Below 1024px the media query takes over at 20px. */
+    padding: 40px 28px;
     flex-grow: 1;
 }
 
