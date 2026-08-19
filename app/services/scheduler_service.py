@@ -55,6 +55,17 @@ class SchedulerService:
                 id="purge_expired_discoveries",
                 replace_existing=True,
             )
+            # Hourly, not daily. The job asks which posts are DUE rather than
+            # measuring everything it finds, so a frequent tick costs nothing
+            # when nothing is stale — and a daily tick would miss the first
+            # reading of a post published just after it ran.
+            self.scheduler.add_job(
+                self._capture_post_metrics,
+                "interval",
+                hours=1,
+                id="capture_post_metrics",
+                replace_existing=True,
+            )
             self.scheduler.start()
             self._running = True
             log.info("Scheduler started")
@@ -100,6 +111,30 @@ class SchedulerService:
                     await session.commit()
             except Exception as e:
                 log.error(f"Error purging expired discovered posts: {e}")
+                await session.rollback()
+
+    async def _capture_post_metrics(self) -> None:
+        """Take a reading of any published post whose newest one has gone stale.
+
+        Commits explicitly, like the purge above: the session factory does not,
+        and readings that rolled back silently would leave the series with gaps
+        while the logs claimed they were captured.
+
+        Every bound lives in metrics_service — this only decides how often to
+        ask. Asking too often is cheap; the run itself is what is budgeted.
+        """
+        from app.database.connection import get_session_factory
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            try:
+                from app.services.metrics_service import capture_due
+
+                summary = await capture_due(session)
+                if summary.captured:
+                    await session.commit()
+            except Exception as e:
+                log.error(f"Error capturing post metrics: {e}")
                 await session.rollback()
 
     def stop(self) -> None:

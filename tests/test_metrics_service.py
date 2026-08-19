@@ -268,3 +268,83 @@ async def test_a_full_run_stores_one_reading_per_due_post(db_session, monkeypatc
     assert summary.captured == 3
     assert len(rows) == 3
     assert {r.reactions for r in rows} == {42}
+
+
+# ------------------------------------------------------------------ scheduling --
+
+@pytest.mark.asyncio
+async def test_the_scheduler_registers_a_metrics_job():
+    # Async because AsyncIOScheduler.start() binds to the running loop.
+    from app.services.scheduler_service import SchedulerService
+
+    service = SchedulerService()
+    service.start()
+    try:
+        job = service.scheduler.get_job("capture_post_metrics")
+        assert job is not None
+        # Hourly rather than daily: the job asks what is DUE, so a frequent tick
+        # costs nothing when nothing is stale, and a daily one would miss the
+        # opening reading of a post published just after it ran.
+        assert job.trigger.interval == timedelta(hours=1)
+    finally:
+        service.stop()
+
+
+@pytest.mark.asyncio
+async def test_the_job_commits_what_it_captured(db_session, monkeypatch):
+    """The session factory does not commit. Readings that rolled back silently
+    would leave gaps while the logs claimed a successful capture."""
+    from app.services.scheduler_service import SchedulerService
+
+    monkeypatch.setattr("app.services.metrics_service.DirectEgress.fetch", _serve())
+    user = await _user(db_session)
+    await _post(db_session, user)
+    await db_session.commit()
+
+    committed = {"n": 0}
+    real_commit = db_session.commit
+
+    async def counting_commit():
+        committed["n"] += 1
+        await real_commit()
+
+    monkeypatch.setattr(db_session, "commit", counting_commit)
+
+    class OneSession:
+        def __call__(self):
+            return self
+        async def __aenter__(self):
+            return db_session
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("app.database.connection.get_session_factory", OneSession())
+
+    await SchedulerService()._capture_post_metrics()
+
+    assert committed["n"] == 1
+    rows = (await db_session.execute(select(PostMetric))).scalars().all()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failing_capture_does_not_take_the_scheduler_down(db_session, monkeypatch):
+    from app.services.scheduler_service import SchedulerService
+
+    async def boom(session):
+        raise RuntimeError("database on fire")
+
+    monkeypatch.setattr("app.services.metrics_service.capture_due", boom)
+
+    class OneSession:
+        def __call__(self):
+            return self
+        async def __aenter__(self):
+            return db_session
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("app.database.connection.get_session_factory", OneSession())
+
+    # Must not raise — a scheduler job that throws stops rescheduling.
+    await SchedulerService()._capture_post_metrics()
