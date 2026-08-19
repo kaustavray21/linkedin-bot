@@ -262,10 +262,12 @@ async def test_without_research_the_prompt_is_unchanged():
     """Deep Think off must leave generation byte-identical to before it existed."""
     style = extract_style_profile([FIVE_BLOCK])
 
-    a = AsyncMock(); a.generate_with_gemini.return_value = FRESH_DRAFT
+    a = AsyncMock()
+    a.generate_with_gemini.return_value = FRESH_DRAFT
     await generate_with_layout(topic="k", exemplar=FIVE_BLOCK, style=style, ai_service=a)
 
-    b = AsyncMock(); b.generate_with_gemini.return_value = FRESH_DRAFT
+    b = AsyncMock()
+    b.generate_with_gemini.return_value = FRESH_DRAFT
     await generate_with_layout(topic="k", exemplar=FIVE_BLOCK, style=style,
                                research="", ai_service=b)
 
