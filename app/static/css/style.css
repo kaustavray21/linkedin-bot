@@ -1446,8 +1446,25 @@ confirm-modal {
        the whole page to scroll sideways. */
     grid-template-columns: minmax(0, 1fr) 300px;
     gap: 28px;
-    max-width: 1280px;
-    margin: 0 auto;
+    /* 1600, not 1280. The library (240), the rail (300) and two 28px gaps eat
+       596px before the editor gets any, so a 1280 cap held the editor to 684px
+       — the "four columns is a lot of chrome" risk the draft plan called out.
+
+       This only bites on wide displays. Available width is viewport minus the
+       280px app sidebar and 80px of body padding, so the cap is only reached
+       above roughly a 1640px viewport: at 1920 the editor goes 684 -> 964, at
+       2560 it reaches the full 1004. At 1440 nothing changes, because the
+       container was already narrower than either cap. Narrowing the rail or the
+       library is the lever for smaller screens, and is deliberately not pulled
+       here — it would shrink panels that have their own content to fit.
+
+       Capped rather than fluid: letting the editor run the full width of an
+       ultrawide gives the textarea a line length nobody reads comfortably, and
+       a LinkedIn post is narrow in reality. */
+    max-width: 1600px;
+    /* Left-aligned rather than centred, so the workspace does not sit in the
+       middle of the viewport with dead gutters either side. */
+    margin: 0 auto 0 0;
     align-items: start;
 }
 

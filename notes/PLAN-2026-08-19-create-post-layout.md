@@ -2,7 +2,7 @@
 
 Date: 2026-08-19
 Branch: `jul-9-contentGeneration-fix-branch`
-Status: **PROPOSED — not started**
+Status: **DONE — 2026-08-19, 3 commits**
 Trigger: screenshot review of the AI assistant panel after P4 shipped
 
 ---
@@ -84,9 +84,22 @@ round-trip through `serialize()`/`hydrate()`.
 - `style.css:1920-1925` — overrides to `240px minmax(0, 1fr) 300px`, and `.library-hidden` back to two
 - `style.css:2077-2083` — under 1280px, collapses to two columns and hides the library
 
-So the middle column today is `1280 − 240 − 300 − (2 × 28 gap)` ≈ **384px** on a wide screen,
-which matches the cramped panel in the screenshot. Risk 9 of the draft plan predicted exactly
-this ("four columns is a lot of chrome… ~560px at 1440px").
+So the chrome costs `240 + 300 + (2 × 28)` = **596px** before the editor gets any. Risk 9 of the
+draft plan predicted this ("four columns is a lot of chrome… ~560px at 1440px").
+
+**Arithmetic corrected after implementation** — the first draft of this plan said the editor was
+~384px and that 1600 would make it ~704px (+83%). Both were wrong. Available width is the
+viewport minus the 280px app sidebar and 80px of body padding, so:
+
+| Viewport | editor @1280 cap | editor @1600 cap |
+|---|---|---|
+| 1440 | 484px | 484px — **no change** |
+| 1920 | 684px | **964px** (+41%) |
+| 2560 | 684px | **1004px** (+47%) |
+
+The cap is only reached above roughly a **1640px viewport**. Below that the container was
+already narrower than either cap and this change does nothing. Narrowing the rail or library is
+the lever for smaller screens; deliberately not pulled, since both panels have content to fit.
 
 **Change, at `style.css:1442-1452` only** — the second block sets columns, not width, so
 editing width there would be the wrong place:
@@ -98,8 +111,8 @@ editing width there would be the wrong place:
 }
 ```
 
-At 1600px the middle column becomes ≈ **704px**, an 83% increase, without touching the rail
-or the library. Left-aligning removes the dead gutter on the left that the screenshot shows.
+Left-aligning removes the dead gutter the screenshot shows — which, like the width change,
+only exists once the viewport exceeds the cap.
 
 **Watch:** the `max-width: 1280px` media query at `:2077` is a *viewport* breakpoint, not a
 container one, so raising the container max-width does not move it. Below 1280px viewport the
