@@ -243,6 +243,99 @@ class App {
         }
     }
 
+    // Results and History both render the post list; Post types renders its own
+    // panel instead. Kept as one switch so a new view cannot half-show.
+    applyDiscoverView() {
+        const showingTypes = this.discoverView === 'types';
+        ['discovered-list', 'discovered-pager', 'discovered-empty', 'discovered-skeleton']
+            .forEach(id => document.getElementById(id).classList.toggle('hidden', showingTypes));
+        document.getElementById('types-panel').classList.toggle('hidden', !showingTypes);
+        // Like and age filters mean nothing against a taxonomy.
+        document.querySelector('.discover-filters').classList.toggle('hidden', showingTypes);
+    }
+
+    async loadPostTypes() {
+        const list = document.getElementById('post-type-list');
+        const empty = document.getElementById('types-empty');
+        const proposalBox = document.getElementById('merge-proposals');
+        const proposalList = document.getElementById('merge-proposal-list');
+
+        let types = [];
+        let proposals = [];
+        try {
+            [types, proposals] = await Promise.all([
+                API.listPostTypes(),
+                API.listMergeProposals(),
+            ]);
+        } catch (error) {
+            this.showToast(error.message || 'Could not load post types.', 'error');
+            return;
+        }
+
+        empty.classList.toggle('hidden', types.length > 0);
+
+        list.innerHTML = types.map(t => `
+            <div class="post-type-row">
+                <div>
+                    <span class="post-type-name">${this.escapeHtml(t.label)}</span>
+                    <span class="post-type-origin ${t.origin}">${
+                        t.origin === 'seed' ? 'built in' : 'coined'}</span>
+                    ${t.description
+                        ? `<p class="post-type-desc">${this.escapeHtml(t.description)}</p>`
+                        : ''}
+                    ${t.why_new
+                        ? `<p class="post-type-why">Reason given: ${this.escapeHtml(t.why_new)}</p>`
+                        : ''}
+                </div>
+                <span class="post-type-usage">${t.usage_count} use${
+                    t.usage_count === 1 ? '' : 's'}</span>
+            </div>
+        `).join('');
+
+        proposalBox.classList.toggle('hidden', proposals.length === 0);
+        proposalList.innerHTML = proposals.map(p => `
+            <div class="merge-proposal">
+                <div>
+                    <strong>${this.escapeHtml(p.loser_slug.replace(/_/g, ' '))}</strong>
+                    ${p.winner_slug
+                        ? `→ <strong>${this.escapeHtml(p.winner_slug.replace(/_/g, ' '))}</strong>`
+                        : '<em>retire</em>'}
+                    <p class="post-type-desc">${this.escapeHtml(p.reason)}${
+                        p.similarity !== null ? ` (similarity ${p.similarity})` : ''}</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm"
+                        data-merge-loser="${this.escapeHtml(p.loser_slug)}"
+                        data-merge-winner="${this.escapeHtml(p.winner_slug || '')}">
+                    ${p.winner_slug ? 'Merge' : 'Retire'}
+                </button>
+            </div>
+        `).join('');
+
+        proposalList.querySelectorAll('[data-merge-loser]').forEach(btn => {
+            btn.addEventListener('click', () => this.mergePostType(
+                btn.dataset.mergeLoser,
+                btn.dataset.mergeWinner || null,
+            ));
+        });
+    }
+
+    async mergePostType(loser, winner) {
+        // Merging repoints every post already classified into the losing type,
+        // so it asks first — unlike registering a type, which does not.
+        const question = winner
+            ? `Fold "${loser}" into "${winner}"? Posts classified as "${loser}" will move across.`
+            : `Retire "${loser}"? Posts classified as it will lose their type.`;
+        if (!window.confirm(question)) return;
+
+        try {
+            const result = await API.mergePostTypes(loser, winner);
+            this.showToast(result.detail, 'success');
+            await this.loadPostTypes();
+        } catch (error) {
+            this.showToast(error.message || 'Merge failed.', 'error');
+        }
+    }
+
     // Renders one page of the already-fetched set. Kept separate from loading so
     // paging never re-requests — the whole result set is one small response.
     // Filters that need a value a post does not have EXCLUDE it and say so.
@@ -911,7 +1004,9 @@ class App {
                 this.discoverView = tab.dataset.view;
                 this.discoverPage = 0;
                 this.selectedPosts.clear();
-                this.loadDiscoveredPosts();
+                this.applyDiscoverView();
+                if (this.discoverView === 'types') this.loadPostTypes();
+                else this.loadDiscoveredPosts();
             });
         });
 

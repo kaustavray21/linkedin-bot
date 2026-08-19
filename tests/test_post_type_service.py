@@ -386,3 +386,145 @@ def test_plural_stripping_knows_when_the_e_belongs_to_the_word(raw, expected):
     """Stripping -es unconditionally turned `listicles` into `listicl`, a slug
     that would then never match the type it was meant to be."""
     assert normalise_slug(raw) == expected
+
+
+# ------------------------------------------------------------- merge pass --
+
+@pytest.mark.asyncio
+async def test_near_identical_types_are_proposed_for_merge(db_session):
+    from app.services.post_type_service import merge_proposals
+
+    await _seed(
+        db_session,
+        ("story", "Story", "A personal narrative with a turn", "seed"),
+        ("personal_story", "Personal Story", "A personal narrative with a turn", "ai"),
+        ("listicle", "List", "Enumerated advice as a countable set", "seed"),
+    )
+
+    proposals = await merge_proposals(db_session)
+    pairs = {(p.loser_slug, p.winner_slug) for p in proposals}
+
+    assert ("personal_story", "story") in pairs
+    # The unrelated type is left alone.
+    assert not any(p.loser_slug == "listicle" for p in proposals)
+
+
+@pytest.mark.asyncio
+async def test_a_seeded_type_always_survives_a_coined_one(db_session):
+    """Even when the coined name is the better-used of the two — the seeds are
+    the vocabulary the taxonomy is meant to have."""
+    from app.services.post_type_service import merge_proposals
+
+    await _seed(
+        db_session,
+        ("story", "Story", "A personal narrative with a turn", "seed"),
+        ("personal_story", "Personal Story", "A personal narrative with a turn", "ai"),
+    )
+    coined = (
+        await db_session.execute(select(PostType).where(PostType.slug == "personal_story"))
+    ).scalar_one()
+    coined.usage_count = 99
+    await db_session.flush()
+
+    proposal = (await merge_proposals(db_session))[0]
+    assert proposal.loser_slug == "personal_story"
+    assert proposal.winner_slug == "story"
+
+
+@pytest.mark.asyncio
+async def test_a_stale_coinage_with_no_neighbour_is_proposed_for_retirement(db_session):
+    from app.services.post_type_service import merge_proposals
+
+    await _seed(
+        db_session,
+        ("story", "Story", "A personal narrative with a turn", "seed"),
+        ("quarterly_earnings", "Quarterly earnings",
+         "Reports fiscal results to investors", "ai"),
+    )
+    orphan = (
+        await db_session.execute(
+            select(PostType).where(PostType.slug == "quarterly_earnings")
+        )
+    ).scalar_one()
+    orphan.last_used_at = _now() - timedelta(days=300)
+    await db_session.flush()
+
+    proposals = await merge_proposals(db_session)
+    retire = [p for p in proposals if p.loser_slug == "quarterly_earnings"]
+
+    assert retire and retire[0].winner_slug is None
+    assert "close to nothing else" in retire[0].reason
+
+
+@pytest.mark.asyncio
+async def test_merging_repoints_the_posts_and_folds_the_usage(db_session):
+    from app.database.models import DiscoveredPost
+    from app.services.post_type_service import merge_types
+
+    await _seed(
+        db_session,
+        ("story", "Story", "A personal narrative", "seed"),
+        ("personal_story", "Personal Story", "A narrative", "ai"),
+    )
+    survivor = (
+        await db_session.execute(select(PostType).where(PostType.slug == "story"))
+    ).scalar_one()
+    loser = (
+        await db_session.execute(select(PostType).where(PostType.slug == "personal_story"))
+    ).scalar_one()
+    survivor.usage_count, loser.usage_count = 4, 3
+
+    db_session.add(DiscoveredPost(
+        keyword="k", source="s", post_url="https://example.com/1",
+        post_type_slug="personal_story",
+    ))
+    await db_session.flush()
+
+    await merge_types(db_session, "personal_story", "story")
+    await db_session.flush()
+
+    post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
+    assert post.post_type_slug == "story"
+
+    assert loser.active is False
+    assert loser.merged_into_id == survivor.id
+    # The survivor carries the history, so decay reflects the idea rather than
+    # whichever name happened to hold it.
+    assert survivor.usage_count == 7
+
+
+@pytest.mark.asyncio
+async def test_retiring_a_type_clears_it_from_its_posts(db_session):
+    from app.database.models import DiscoveredPost
+    from app.services.post_type_service import merge_types
+
+    await _seed(db_session, ("one_off", "One off", "Coined once", "ai"))
+    db_session.add(DiscoveredPost(
+        keyword="k", source="s", post_url="https://example.com/2",
+        post_type_slug="one_off",
+    ))
+    await db_session.flush()
+
+    await merge_types(db_session, "one_off", None)
+    await db_session.flush()
+
+    post = (await db_session.execute(select(DiscoveredPost))).scalar_one()
+    assert post.post_type_slug is None
+
+
+@pytest.mark.asyncio
+async def test_a_type_cannot_be_merged_into_itself(db_session):
+    from app.services.post_type_service import merge_types
+
+    await _seed(db_session, ("story", "Story", "A narrative", "seed"))
+    with pytest.raises(ValueError, match="into itself"):
+        await merge_types(db_session, "story", "story")
+
+
+@pytest.mark.asyncio
+async def test_merging_an_unknown_type_is_rejected(db_session):
+    from app.services.post_type_service import merge_types
+
+    await _seed(db_session, ("story", "Story", "A narrative", "seed"))
+    with pytest.raises(ValueError, match="No such post type"):
+        await merge_types(db_session, "nonsense", "story")

@@ -233,6 +233,24 @@ const API = {
         });
     },
 
+    // ------------------------------------------------------------ POST TYPES --
+
+    async listPostTypes() {
+        return this.request('/post-types');
+    },
+
+    async listMergeProposals() {
+        return this.request('/post-types/merge-proposals');
+    },
+
+    // winnerSlug null retires the type rather than folding it into another.
+    async mergePostTypes(loserSlug, winnerSlug = null) {
+        return this.request('/post-types/merge', {
+            method: 'POST',
+            body: JSON.stringify({ loser_slug: loserSlug, winner_slug: winnerSlug })
+        });
+    },
+
     // ----------------------------------------------------------------- MEDIA --
 
     // Upload an image from the user's device.

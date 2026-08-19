@@ -431,3 +431,164 @@ async def stale_types(db: AsyncSession, days: int | None = None) -> list[PostTyp
         if (t.last_used_at or t.first_seen_at) is not None
         and (t.last_used_at or t.first_seen_at) < cutoff
     ]
+
+
+# ---------------------------------------------------------------- merge pass --
+
+@dataclass
+class MergeProposal:
+    """A suggestion, never an action. Merging is destructive enough to ask."""
+
+    loser_slug: str
+    winner_slug: str | None          # None means retire rather than merge
+    reason: str
+    similarity: float | None = None
+    loser_usage: int = 0
+    winner_usage: int = 0
+    loser_origin: str = "ai"
+
+
+def _pick_loser(a: PostType, b: PostType) -> tuple[PostType, PostType]:
+    """Which of two near-identical types survives.
+
+    A seeded type always outlives a coined one — the seeds are the vocabulary
+    the taxonomy is meant to have. Otherwise the better-used name wins, and an
+    exact tie goes to whichever existed first.
+    """
+    if a.origin != b.origin:
+        return (b, a) if a.origin == "seed" else (a, b)
+    if (a.usage_count or 0) != (b.usage_count or 0):
+        return (a, b) if (a.usage_count or 0) < (b.usage_count or 0) else (b, a)
+    return (b, a) if a.id < b.id else (a, b)
+
+
+async def merge_proposals(db: AsyncSession) -> list[MergeProposal]:
+    """Guards 4 and 5, surfaced. Nothing here writes.
+
+    Two sources: types close enough that keeping both makes the classification
+    ambiguous, and coined types nobody has used inside the decay window. The
+    second is why usage is tracked at all — a model that coins a type for one
+    post and never reaches for it again has added noise, not vocabulary.
+    """
+    rows = (
+        await db.execute(
+            select(PostType).where(PostType.active.is_(True)).order_by(PostType.id)
+        )
+    ).scalars().all()
+
+    proposals: list[MergeProposal] = []
+    paired: set[tuple[str, str]] = set()
+
+    for i, a in enumerate(rows):
+        for b in rows[i + 1:]:
+            score = proposal_similarity(
+                a.slug, a.label, a.description or "",
+                b.slug, b.label, b.description or "",
+            )
+            if score < settings.post_type_snap_threshold:
+                continue
+            loser, winner = _pick_loser(a, b)
+            key = (loser.slug, winner.slug)
+            if key in paired:
+                continue
+            paired.add(key)
+            proposals.append(MergeProposal(
+                loser_slug=loser.slug,
+                winner_slug=winner.slug,
+                reason=f"'{loser.slug}' and '{winner.slug}' describe the same kind of post",
+                similarity=round(score, 2),
+                loser_usage=loser.usage_count or 0,
+                winner_usage=winner.usage_count or 0,
+                loser_origin=loser.origin,
+            ))
+
+    already = {p.loser_slug for p in proposals}
+    for stale in await stale_types(db):
+        if stale.slug in already:
+            continue
+        # A stale type with no close neighbour is retired rather than merged:
+        # folding it into something unrelated would be worse than losing it.
+        best_slug, best_score = None, 0.0
+        for other in rows:
+            if other.slug == stale.slug:
+                continue
+            score = proposal_similarity(
+                stale.slug, stale.label, stale.description or "",
+                other.slug, other.label, other.description or "",
+            )
+            if score > best_score:
+                best_slug, best_score = other.slug, score
+
+        days = settings.post_type_decay_days
+        if best_slug and best_score >= settings.post_type_brake_snap_threshold:
+            proposals.append(MergeProposal(
+                loser_slug=stale.slug, winner_slug=best_slug,
+                reason=f"unused for over {days} days; closest existing type is '{best_slug}'",
+                similarity=round(best_score, 2),
+                loser_usage=stale.usage_count or 0,
+                loser_origin=stale.origin,
+            ))
+        else:
+            proposals.append(MergeProposal(
+                loser_slug=stale.slug, winner_slug=None,
+                reason=f"unused for over {days} days and close to nothing else",
+                loser_usage=stale.usage_count or 0,
+                loser_origin=stale.origin,
+            ))
+
+    return proposals
+
+
+async def merge_types(db: AsyncSession, loser_slug: str, winner_slug: str | None) -> str:
+    """Fold one type into another, or retire it. Writes — call serially.
+
+    The loser is deactivated rather than deleted. Posts already classified into
+    it are repointed here, but `merged_into_id` still has to be set: a
+    classification that names the old slug afterwards must resolve to the
+    survivor rather than being refused.
+    """
+    loser = await _get_by_slug(db, loser_slug)
+    if loser is None:
+        raise ValueError(f"No such post type: {loser_slug}")
+
+    winner = None
+    if winner_slug:
+        winner = await _get_by_slug(db, winner_slug)
+        if winner is None:
+            raise ValueError(f"No such post type: {winner_slug}")
+        if winner.id == loser.id:
+            raise ValueError("A type cannot be merged into itself")
+        if not winner.active:
+            raise ValueError(f"'{winner_slug}' is not an active type")
+
+    from app.database.models import DiscoveredPost
+
+    posts = (
+        await db.execute(
+            select(DiscoveredPost).where(DiscoveredPost.post_type_slug == loser.slug)
+        )
+    ).scalars().all()
+    for post in posts:
+        post.post_type_slug = winner.slug if winner else None
+        db.add(post)
+
+    loser.active = False
+    if winner is not None:
+        loser.merged_into_id = winner.id
+        # The survivor inherits the history, so the decay window reflects how
+        # often the *idea* was used rather than which name happened to carry it.
+        winner.usage_count = (winner.usage_count or 0) + (loser.usage_count or 0)
+        if loser.last_used_at and (
+            winner.last_used_at is None or loser.last_used_at > winner.last_used_at
+        ):
+            winner.last_used_at = loser.last_used_at
+        db.add(winner)
+    db.add(loser)
+
+    log.info(
+        "Post type merged",
+        loser=loser.slug,
+        winner=winner.slug if winner else None,
+        posts_repointed=len(posts),
+    )
+    return winner.slug if winner else ""

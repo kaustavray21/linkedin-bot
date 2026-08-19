@@ -232,6 +232,7 @@
                                 <div class="discover-tabs">
                                     <button type="button" class="disc-tab active" data-view="results">Results</button>
                                     <button type="button" class="disc-tab" data-view="history">History</button>
+                                    <button type="button" class="disc-tab" data-view="types">Post types</button>
                                 </div>
                                 <div class="discover-filters">
                                     <input type="number" id="filter-min-likes" min="0" placeholder="Min likes">
@@ -277,6 +278,25 @@
                                     <i class="fa-solid fa-inbox"></i>
                                     <h4>Nothing discovered yet</h4>
                                     <p>Enter a topic above to find posts performing well on it.</p>
+                                </div>
+
+                                <!-- Post types. The taxonomy adds to itself during
+                                     discovery; this is where it gets tidied back up. -->
+                                <div id="types-panel" class="hidden">
+                                    <div id="merge-proposals" class="merge-proposals hidden">
+                                        <h4>Suggested merges</h4>
+                                        <p class="help-text">
+                                            Types close enough to be ambiguous, and coined types nothing
+                                            has used lately. Nothing is merged until you say so.
+                                        </p>
+                                        <div id="merge-proposal-list"></div>
+                                    </div>
+                                    <div id="post-type-list" class="post-type-list"></div>
+                                    <div id="types-empty" class="empty-state hidden">
+                                        <i class="fa-solid fa-tags"></i>
+                                        <h4>No post types yet</h4>
+                                        <p>Types appear as discovered posts get classified.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

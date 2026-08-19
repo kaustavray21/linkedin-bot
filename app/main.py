@@ -8,7 +8,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 
-from app.api import auth_router, discovery_router, generate_router, health_router, media_router, posts_router, profile_router, scheduler_router
+from app.api import (
+    auth_router,
+    discovery_router,
+    generate_router,
+    health_router,
+    media_router,
+    post_types_router,
+    posts_router,
+    profile_router,
+    scheduler_router,
+)
 from app.api.deps import set_scheduler_service
 from app.core.config import settings
 from app.core.exceptions import AppException
@@ -85,6 +95,7 @@ app.include_router(scheduler_router)
 app.include_router(generate_router)
 app.include_router(media_router)
 app.include_router(discovery_router)
+app.include_router(post_types_router)
 
 
 # Ensure uploads and static directories exist
