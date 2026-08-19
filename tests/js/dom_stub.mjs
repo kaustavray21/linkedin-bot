@@ -208,7 +208,7 @@ export function editorComponents() {
     };
 }
 
-export function bootApp(appJsPath, api = {}, components = {}) {
+export function bootApp(appJsPath, api = {}, components = {}, initialStorage = {}) {
     registry.clear();
     resolvers.clear();
     doc._listeners = {};
@@ -221,7 +221,10 @@ export function bootApp(appJsPath, api = {}, components = {}) {
 
     const windowListeners = {};
 
-    const storage = new Map();
+    // Seeded before app.js runs: preferences read during setup — the sidebar
+    // and library collapse states — are applied at boot, so setting them
+    // afterwards would test nothing.
+    const storage = new Map(Object.entries(initialStorage));
     const sandbox = {
         console,
         setTimeout,

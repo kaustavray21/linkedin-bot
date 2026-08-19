@@ -244,6 +244,31 @@ async function testAHandoffFromDiscoveryLandsOnTheDraft() {
     check('discovery handoff shows the editor', el('create-launcher').hidden);
 }
 
+// ------------------------------------------------- library collapse memory --
+
+async function testCollapsingTheLibraryIsRemembered() {
+    // The largest width lever the editor has is 242px of library. Having to
+    // reclaim it after every reload is why it goes unused.
+    const { app, storage } = boot();
+
+    app.toggleLibrary(false);
+    equal('collapsing is written down', storage.get('library_collapsed'), '1');
+
+    app.toggleLibrary(true);
+    equal('reopening is written down too', storage.get('library_collapsed'), '0');
+}
+
+async function testAStoredCollapseIsAppliedOnBoot() {
+    const { app, el, sel } = bootApp(APP_JS, {
+        listDrafts: async () => [], listPosts: async () => [],
+        listDiscoveredPosts: async () => [],
+    }, editorComponents(), { library_collapsed: '1' });
+
+    check('the library starts collapsed', sel('draft-library').hidden);
+    check('the workspace reserves no column for it',
+          sel('.create-workspace').classList.contains('library-hidden'));
+}
+
 const run = async () => {
     await testSelectingAnExemplarBindsItToTheDraft();
     await testTheSelectionMakesTheDraftDirty();
@@ -257,6 +282,8 @@ const run = async () => {
     await testTheExemplarPathLandsOnTheDraft();
     await testThePlainPathAlsoLandsOnTheDraft();
     await testAHandoffFromDiscoveryLandsOnTheDraft();
+    await testCollapsingTheLibraryIsRemembered();
+    await testAStoredCollapseIsAppliedOnBoot();
     report('P4 exemplar picker');
 };
 

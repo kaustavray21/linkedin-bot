@@ -1192,6 +1192,7 @@ class App {
         const sidebarToggle = document.getElementById('btn-toggle-sidebar');
         sidebarToggle.addEventListener('click', () => this.toggleSidebar());
         if (localStorage.getItem('sidebar_collapsed') === '1') this.toggleSidebar(true);
+        if (localStorage.getItem('library_collapsed') === '1') this.toggleLibrary(false);
 
         // Closing the page. pagehide is the one that fires reliably on mobile
         // and on bfcache eviction; visibilitychange catches the tab being
@@ -1255,6 +1256,11 @@ class App {
         document.getElementById('btn-show-library').classList.toggle('hidden', show);
         document.querySelector('.create-workspace')
             .classList.toggle('library-hidden', !show);
+        // Persisted like the app sidebar beside it. Collapsing the library is
+        // the largest width lever the editor has — 242px, more than the
+        // max-width change gives on most screens — and having to reclaim it
+        // after every reload is why it goes unused.
+        localStorage.setItem('library_collapsed', show ? '0' : '1');
     }
 
     async loadDrafts() {
