@@ -742,6 +742,46 @@ h1, h2, h3, h4, h5, h6 {
     text-transform: capitalize;
 }
 
+/* --- post outcomes -------------------------------------------------------- */
+
+.outcomes-list { display: flex; flex-direction: column; gap: 8px; }
+
+.outcome-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+}
+
+.outcome-main { min-width: 0; }
+.outcome-preview {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.outcome-meta { font-size: 0.78rem; color: var(--text-secondary); }
+
+.outcome-badge {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 10px;
+}
+
+/* A comparison that could not be made must not look like a neutral result. */
+.outcome-badge.unknown { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.outcome-badge.above { background: var(--color-success-bg); color: var(--color-success); }
+.outcome-badge.level { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); }
+.outcome-badge.below { background: var(--color-warning-bg); color: var(--color-warning); }
+
 /* --- exemplar picker ------------------------------------------------------ */
 
 .exemplar-hint { margin: 0 0 8px; }

@@ -236,6 +236,22 @@ const API = {
         });
     },
 
+    // -------------------------------------------------------------- ANALYTICS --
+
+    async listOutcomes() {
+        return this.request(`/analytics/outcomes?user_id=${this.getUserId()}`);
+    },
+
+    async getPostSeries(postId) {
+        return this.request(`/analytics/posts/${postId}/series`);
+    },
+
+    // Runs the same bounded path the scheduler uses — the daily ceiling and the
+    // circuit check still apply, so pressing this repeatedly is safe.
+    async captureMetrics() {
+        return this.request('/analytics/capture', { method: 'POST' });
+    },
+
     // ------------------------------------------------------------ POST TYPES --
 
     async listPostTypes() {

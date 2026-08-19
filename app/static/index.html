@@ -151,6 +151,32 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Observation only. Nothing here changes what the
+                                     app recommends; it reports how posts did against
+                                     your own baseline and says what each number rests
+                                     on, including when that is "not enough data". -->
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h3>How your posts performed</h3>
+                                        <button id="btn-capture-metrics" class="btn btn-secondary btn-sm">
+                                            <i class="fa-solid fa-arrows-rotate"></i> Refresh now
+                                        </button>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="help-text">
+                                            Each post against the median of your own posts at the same age —
+                                            never against the post it was shaped after, which would mostly
+                                            measure follower count.
+                                        </p>
+                                        <div id="outcomes-list" class="outcomes-list"></div>
+                                        <div id="outcomes-empty" class="empty-state hidden">
+                                            <i class="fa-solid fa-chart-line"></i>
+                                            <h4>Nothing measured yet</h4>
+                                            <p>Readings are taken automatically after a post goes live.</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="dashboard-side">
                                 <div class="card">

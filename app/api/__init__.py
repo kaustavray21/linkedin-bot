@@ -1,3 +1,4 @@
+from app.api.analytics import router as analytics_router
 from app.api.auth import router as auth_router
 from app.api.discovery import router as discovery_router
 from app.api.generate import router as generate_router
@@ -9,6 +10,7 @@ from app.api.profile import router as profile_router
 from app.api.scheduler import router as scheduler_router
 
 __all__ = [
+    "analytics_router",
     "auth_router",
     "discovery_router",
     "generate_router",

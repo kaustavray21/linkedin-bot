@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 import os
 
 from app.api import (
+    analytics_router,
     auth_router,
     discovery_router,
     generate_router,
@@ -96,6 +97,7 @@ app.include_router(generate_router)
 app.include_router(media_router)
 app.include_router(discovery_router)
 app.include_router(post_types_router)
+app.include_router(analytics_router)
 
 
 # Ensure uploads and static directories exist

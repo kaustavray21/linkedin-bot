@@ -1134,6 +1134,11 @@ class App {
             library.addEventListener('draft-delete', (e) => this.deleteDraft(e.detail.id));
             library.addEventListener('library-collapse', () => this.toggleLibrary(false));
         }
+        const captureBtn = document.getElementById('btn-capture-metrics');
+        if (captureBtn) {
+            captureBtn.addEventListener('click', () => this.captureMetricsNow(captureBtn));
+        }
+
         document.getElementById('btn-show-library')
             .addEventListener('click', () => this.toggleLibrary(true));
         document.getElementById('btn-launcher-new')
@@ -1833,7 +1838,83 @@ class App {
         }
     }
 
+    // How each published post did against your own baseline. Reports only —
+    // nothing here feeds back into ranking or defaults yet.
+    async loadOutcomes() {
+        const list = document.getElementById('outcomes-list');
+        const empty = document.getElementById('outcomes-empty');
+        if (!list) return;
+
+        let outcomes = [];
+        try {
+            outcomes = await API.listOutcomes();
+        } catch (error) {
+            return;
+        }
+        if (!Array.isArray(outcomes)) return;
+
+        empty.classList.toggle('hidden', outcomes.length > 0);
+        list.innerHTML = outcomes.map(o => `
+            <div class="outcome-row">
+                <div class="outcome-main">
+                    <span class="outcome-preview">${this.escapeHtml(o.preview)}</span>
+                    <span class="outcome-meta">${this.describeOutcome(o)}</span>
+                </div>
+                ${this.outcomeBadge(o)}
+            </div>
+        `).join('');
+    }
+
+    // Every branch names what it rests on. A missing ratio is explained rather
+    // than rendered as a dash the reader has to interpret.
+    describeOutcome(o) {
+        const age = o.age_hours === null ? '' : `at ${o.age_hours}h · `;
+
+        if (o.basis === 'not_measured') return 'no reading yet';
+        if (o.basis === 'not_enough_data') {
+            const n = o.sample_size;
+            return `${age}${o.engagement} reactions · `
+                + `no baseline yet (${n} comparable post${n === 1 ? '' : 's'})`;
+        }
+        if (o.ratio === null) {
+            // A zero median. The engagement is still real.
+            return `${age}${o.engagement} reactions · your median at this age is 0`;
+        }
+        return `${age}${o.engagement} reactions vs a median of ${o.median} `
+            + `across ${o.sample_size} post${o.sample_size === 1 ? '' : 's'}`;
+    }
+
+    outcomeBadge(o) {
+        if (o.basis !== 'measured' || o.ratio === null) {
+            return `<span class="outcome-badge unknown">not compared</span>`;
+        }
+        const tone = o.ratio >= 1.2 ? 'above' : (o.ratio <= 0.8 ? 'below' : 'level');
+        return `<span class="outcome-badge ${tone}">${o.ratio.toFixed(2)}×</span>`;
+    }
+
+    async captureMetricsNow(button) {
+        this.setButtonLoading(button, true);
+        try {
+            const result = await API.captureMetrics();
+            if (result.stopped) {
+                this.showToast(result.stopped, 'warning');
+            } else {
+                this.showToast(
+                    `Took ${result.captured} reading(s) of ${result.considered} due.`,
+                    'success',
+                );
+            }
+            (result.notes || []).forEach(n => this.showToast(n, 'info'));
+            await this.loadOutcomes();
+        } catch (error) {
+            this.showToast(error.message || 'Could not take readings.', 'error');
+        } finally {
+            this.setButtonLoading(button, false);
+        }
+    }
+
     async loadDashboardData() {
+        this.loadOutcomes();
         try {
             const posts = await API.listPosts();
             
