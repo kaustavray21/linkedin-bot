@@ -2,7 +2,7 @@
 
 Date: 2026-08-17 (rev 7 — S0, S1, P0–P3, P5, P6 executed)
 Branch: `jul-9-contentGeneration-fix-branch`
-Status: **IN PROGRESS — S0 ✅ · S1 ✅ · P0 ✅ · P1 ✅ · P2 ✅ · P3 ✅ · P5 ✅ · P6 ✅ · P4 and P7 outstanding**
+Status: **IN PROGRESS — S0 ✅ · S1 ✅ · P0–P6 ✅ · P7 outstanding**
 
 ## EXECUTION LOG — S1 (2026-08-18)
 
@@ -29,6 +29,35 @@ The parallel-rendering-block question is moot: a tier with 0% information gain d
 Harness: `scripts/spike_rendered_counts.py` (re-runnable). Full write-up: `~/.anvideck/projects/linkedin-bot/ref/GROUND_TRUTH_LINKEDIN_PUBLIC_POST_COUNTS.md`.
 
 **Consequence for P4/P7:** ⑨/⑩ become real via a parser fix, not a browser.
+
+## EXECUTION LOG — P4 (2026-08-19)
+
+Shipped as eight commits rather than one, each independently verifiable.
+
+| Commit | What |
+|---|---|
+| `c7c63d9` | `retarget_skeleton()` — reshape a skeleton to N blocks |
+| `f4e79c0` | ② paragraph count reaches the exemplar path |
+| `298c537` | `post_types` table, six seeds |
+| `df505e7` | Classifier + all six anti-explosion guards |
+| `b3db44b` | ③ classification during discovery, parallel then serial |
+| `f1ca21c` | Merge proposals — detection, API, Post types view |
+| `e2995bf` | ① discovery picker in Create Post |
+| `6bc4d82` | ④⑤ Generate Draft clones the chosen post, steered by type |
+
+**Both plan checks pass.** Cloning a 5-block exemplar with the count set to 3 yields exactly 3 blocks with the similarity gate still passing; feeding the classifier a Gemini outage refuses rather than creating a type.
+
+**The paragraph control had to be structural.** Asking for "3 paragraphs" in prose is the same class of instruction `layout_service` exists to replace — and worse here, because `enforce_layout` would still hold the *exemplar's* block count and reshape the output straight back to it. The control would have looked like it worked and done nothing. Retargeting the skeleton first makes the template, the prompt and the enforcement agree on one number.
+
+**Classification is a second parallel stage, not a step in the write loop.** Eager classification means a model call per post; run inside the serial section they would queue up and turn a 30-post search from seconds into minutes. The wave now fetches concurrently, parses, proposes types concurrently, then writes serially — the taxonomy crossing into workers as plain dicts for the same reason the fetcher never sees `db`. Enabling it also revealed that the discovery tests were reaching the live Gemini API: the suite went from 12s to 82s and real model latency landed inside the fetcher's timing assertions, which failed. An autouse fixture disables it, and the tests that exercise it inject a fake.
+
+**Three defects the work surfaced:**
+
+1. `runStagedHandoff` opens with `startNewPost()`, which clears the exemplar — so reading `this.exemplarId` lazily inside the thunk sent `null` and the request was rejected. The Discover-tab path never hit it because it closes over the post it was clicked on. Now captured before the handoff starts.
+2. The plural rule in slug normalisation stripped `-es` unconditionally, turning `listicles` into `listicl` — a slug that would then never match the type it meant. It now only strips after a sibilant.
+3. An earlier draft called a `markDirtyNow()` that does not exist. Nothing needs it: `exemplarId` is in `serialize()`, so choosing one moves `serialize() !== lastSaved` by itself.
+
+**Guard 2 finds paraphrase and narrowing, not synonymy.** Nothing relates `narrative` to `story` without a stemmer or embeddings. That is why the growth brake and the merge pass exist rather than being optional, and the code says so instead of implying more.
 
 ## EXECUTION LOG — count extractor fix (2026-08-18)
 
@@ -467,7 +496,7 @@ Port the profiled prototype into `RateLimitedFetcher`: semaphore + token bucket 
 ### P3 — Filters, history, multi-select delete
 ⑩ date-range and like-range filters with an explicit "N of M have measured counts" disclosure — unread counts are excluded and reported, never treated as zero. ⑪ history sub-tab. ⑫ multi-select delete via the existing `<confirm-modal>`, listing posts and flagging any used for a real draft.
 
-### P4 — Create Post on discovery exemplars + taxonomy
+### P4 — Create Post on discovery exemplars + taxonomy ✅ *(2026-08-19)*
 ① discovery picker replaces the deleted reference UI · ② paragraph count via `retarget_skeleton` · ③④ post-type classification with the self-extending taxonomy and all six guards from §2.7 · ⑤ Generate Draft through the existing `remix_from_post()`.
 **Verify:** clone a 5-block exemplar with count set to 3 → exactly 3 blocks, similarity gate still passes. Feed the classifier a Gemini outage → refuses, does not create a type.
 
