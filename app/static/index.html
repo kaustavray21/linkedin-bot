@@ -396,6 +396,17 @@
                                                               unchanged, so serialize()/hydrate() read it exactly
                                                               as before. -->
                                                          <textarea id="ai-text-prompt" rows="3" placeholder="Enter a topic, or paste keywords and notes to research (e.g. '3 tips for learning SQLAlchemy')"></textarea>
+                                                         <!-- Deep Think. Off by default: it costs a web search,
+                                                              several page fetches and a model call on top of the
+                                                              generate. aria-pressed carries the state, so it reads
+                                                              as a toggle rather than a button that fires. -->
+                                                         <button type="button" id="btn-deep-think"
+                                                                 class="btn btn-secondary deep-think-toggle"
+                                                                 aria-pressed="false"
+                                                                 title="Search the web about this topic before writing">
+                                                             <i class="fa-solid fa-magnifying-glass-chart"></i>
+                                                             <span class="btn-text">Deep Think</span>
+                                                         </button>
                                                          <button type="button" id="btn-generate-text" class="btn btn-secondary">
                                                              <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
                                                              <span class="btn-text">Generate Draft</span>
@@ -413,6 +424,10 @@
                                                  <p class="help-text" style="margin: -8px 0 0;">
                                                      Paragraphs, tone and notes below shape the draft.
                                                  </p>
+                                                 <!-- Findings are shown, never applied invisibly: the post is
+                                                      published under the user's name, so they judge the sources
+                                                      before it goes out. -->
+                                                 <div id="research-notes" class="research-notes hidden"></div>
 
                                                  <!-- Length, Formatting & Variations Options -->
                                                  <div style="display: flex; gap: 12px;">

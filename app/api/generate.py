@@ -268,6 +268,38 @@ async def generate_from_topic_endpoint(
     return _remix_to_response(result)
 
 
+class ResearchRequest(BaseModel):
+    topic: str
+
+
+class ResearchResponse(BaseModel):
+    notes: str
+    sources: list[dict]
+    ok: bool
+    reason: str | None
+    pages_read: int
+
+
+@router.post("/research", response_model=ResearchResponse)
+async def research_endpoint(body: ResearchRequest):
+    """Search and condense the web on a topic. Never fails the caller.
+
+    A refusal comes back as ok=false with a reason rather than an error status,
+    because "the sources did not cover this" is a result the interface has to
+    show, not a fault to retry.
+    """
+    from app.services.research_service import research_topic
+
+    result = await research_topic(body.topic)
+    return ResearchResponse(
+        notes=result.notes,
+        sources=[{"title": s.title, "url": s.url} for s in result.sources],
+        ok=result.ok,
+        reason=result.reason,
+        pages_read=result.pages_read,
+    )
+
+
 @router.post("/remix", response_model=RemixResponse)
 async def remix_endpoint(
     body: RemixRequest,

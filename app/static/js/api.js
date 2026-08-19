@@ -222,7 +222,7 @@ const API = {
     // Draft a post shaped like one specific discovered post.
     // postTypeSlug null keeps however the exemplar itself was classified.
     async remixPost(topic, exemplarId, notes = '', withImage = true,
-                    numParagraphs = null, postTypeSlug = null) {
+                    numParagraphs = null, postTypeSlug = null, research = null) {
         return this.request('/generate/remix', {
             method: 'POST',
             body: JSON.stringify({
@@ -231,8 +231,18 @@ const API = {
                 user_notes: notes,
                 with_image: withImage,
                 num_paragraphs: numParagraphs,
-                post_type_slug: postTypeSlug
+                post_type_slug: postTypeSlug,
+                research: research
             })
+        });
+    },
+
+    // Search the web about a topic and condense what it says. Separate from the
+    // generate call so the findings can be shown before the draft is written.
+    async researchTopic(topic) {
+        return this.request('/generate/research', {
+            method: 'POST',
+            body: JSON.stringify({ topic })
         });
     },
 

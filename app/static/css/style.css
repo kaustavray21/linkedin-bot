@@ -747,6 +747,40 @@ h1, h2, h3, h4, h5, h6 {
     text-transform: capitalize;
 }
 
+/* --- deep think ----------------------------------------------------------- */
+
+.deep-think-toggle.active {
+    background: rgba(120, 150, 255, 0.16);
+    border-color: rgba(120, 150, 255, 0.4);
+    color: #8fa6ff;
+}
+
+.research-notes {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    padding: 10px 12px;
+}
+
+.research-head { font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; }
+
+.research-body {
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.research-sources { margin: 8px 0 0; padding-left: 18px; }
+.research-sources a { font-size: 0.76rem; color: var(--text-muted); }
+.research-sources a:hover { color: var(--color-primary); }
+
+/* A run that found nothing must not look like one that found something. */
+.research-empty { margin: 0; font-size: 0.82rem; color: var(--color-warning); }
+
 /* --- post outcomes -------------------------------------------------------- */
 
 .outcomes-list { display: flex; flex-direction: column; gap: 8px; }

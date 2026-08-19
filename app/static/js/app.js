@@ -588,14 +588,18 @@ class App {
         const editor = document.querySelector('.textarea-container');
 
         const messages = {
+            researching: 'Reading the web about this topic…',
             writing: 'Writing the draft…',
             image: 'Draft ready — generating an image…',
         };
 
         banner.classList.toggle('hidden', !stage);
         if (stage) label.textContent = messages[stage] || '';
-        skeleton.classList.toggle('hidden', stage !== 'writing');
-        editor.classList.toggle('hidden', stage === 'writing');
+        // Research and writing both leave nothing to edit yet, so both hide the
+        // editor behind the skeleton.
+        const pending = stage === 'writing' || stage === 'researching';
+        skeleton.classList.toggle('hidden', !pending);
+        editor.classList.toggle('hidden', pending);
     }
 
     // The one place the exemplar is set. It is three linked facts — the id the
@@ -629,6 +633,66 @@ class App {
 
     // Fills the post-type select. "Same as the chosen post" stays the default:
     // cloning a post should reproduce its kind unless the user overrides it.
+    setDeepThink(on) {
+        this.deepThink = Boolean(on);
+        const btn = document.getElementById('btn-deep-think');
+        if (!btn) return;
+        btn.classList.toggle('active', this.deepThink);
+        btn.setAttribute('aria-pressed', this.deepThink ? 'true' : 'false');
+        // Findings belong to the run that produced them; turning the toggle off
+        // clears them so a later draft cannot silently inherit old research.
+        if (!this.deepThink) this.setResearch(null);
+    }
+
+    // Research is held here rather than in the panel, because it has to reach
+    // the generate call and survive serialize()/hydrate() alongside everything
+    // else in the editor.
+    setResearch(result) {
+        this.research = result && result.ok ? result : null;
+        const panel = document.getElementById('research-notes');
+        if (!panel) return;
+
+        if (!result) {
+            panel.classList.add('hidden');
+            panel.innerHTML = '';
+            return;
+        }
+
+        if (!result.ok) {
+            // Said out loud. A draft written without findings must not look like
+            // one written with them.
+            panel.innerHTML = `<p class="research-empty">No findings — ${
+                this.escapeHtml(result.reason || 'research came back empty')}. `
+                + `The draft will be written without them.</p>`;
+            panel.classList.remove('hidden');
+            return;
+        }
+
+        const sources = (result.sources || []).map((s, i) => `
+            <li><a href="${this.escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">
+                [${i + 1}] ${this.escapeHtml(s.title || s.url)}</a></li>`).join('');
+
+        panel.innerHTML = `
+            <div class="research-head">Findings from ${result.pages_read} page(s)</div>
+            <pre class="research-body">${this.escapeHtml(result.notes)}</pre>
+            <ul class="research-sources">${sources}</ul>`;
+        panel.classList.remove('hidden');
+    }
+
+    async runDeepThink(topic) {
+        this.setDraftStage('researching');
+        try {
+            const result = await API.researchTopic(topic);
+            this.setResearch(result);
+            if (!result.ok) this.showToast(result.reason || 'No findings.', 'warning');
+            return result.ok ? result.notes : null;
+        } catch (error) {
+            // Research failing must never cost the draft.
+            this.setResearch({ ok: false, reason: error.message || 'research failed' });
+            return null;
+        }
+    }
+
     async loadPostTypeOptions() {
         const select = document.getElementById('create-post-type');
         if (this.postTypeOptions) return;
@@ -888,6 +952,13 @@ class App {
             const numParagraphs = paraVal === '' ? null : parseInt(paraVal);
             const notes = document.getElementById('create-notes-input').value.trim();
 
+            // Deep Think runs before either path, so the findings are on screen
+            // before a word is written and can be judged first.
+            let research = null;
+            if (this.deepThink) {
+                research = await this.runDeepThink(prompt);
+            }
+
             if (this.exemplarId) {
                 // with_image=false: the image is stage 2, built from the text
                 // this call returns. Asking for both at once folds the two waits
@@ -903,7 +974,7 @@ class App {
                 this.setButtonLoading(btn, true);
                 try {
                     await this.runStagedHandoff(() => API.remixPost(
-                        prompt, exemplarId, notes, false, numParagraphs, postType,
+                        prompt, exemplarId, notes, false, numParagraphs, postType, research,
                     ));
                 } finally {
                     this.setButtonLoading(btn, false);
@@ -1143,6 +1214,11 @@ class App {
             library.addEventListener('draft-delete', (e) => this.deleteDraft(e.detail.id));
             library.addEventListener('library-collapse', () => this.toggleLibrary(false));
         }
+        const deepBtn = document.getElementById('btn-deep-think');
+        if (deepBtn) {
+            deepBtn.addEventListener('click', () => this.setDeepThink(!this.deepThink));
+        }
+
         const captureBtn = document.getElementById('btn-capture-metrics');
         if (captureBtn) {
             captureBtn.addEventListener('click', () => this.captureMetricsNow(captureBtn));
@@ -1404,6 +1480,7 @@ class App {
             rhythm: value('create-rhythm'),
             wordType: value('create-word-type'),
             postType: value('create-post-type'),
+            deepThink: Boolean(this.deepThink),
             exemplarId: this.exemplarId ?? null,
             exemplarUrl: this.exemplarUrl ?? null,
             exemplarAuthor: this.exemplarAuthor ?? null,
@@ -1442,6 +1519,7 @@ class App {
         set('create-rhythm', state.rhythm);
         set('create-word-type', state.wordType);
         set('create-post-type', state.postType);
+        this.setDeepThink(Boolean(state.deepThink));
 
         this.setExemplar(state.exemplarId, state.exemplarUrl, state.exemplarAuthor);
 

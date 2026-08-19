@@ -269,6 +269,75 @@ async function testAStoredCollapseIsAppliedOnBoot() {
           sel('.create-workspace').classList.contains('library-hidden'));
 }
 
+// ----------------------------------------------------------- deep think --
+
+async function testDeepThinkRunsBeforeAnythingIsWritten() {
+    const order = [];
+    const { app, el, sel } = boot({
+        researchTopic: async () => {
+            order.push('research');
+            return { ok: true, notes: '- a finding [1]', sources: [], pages_read: 2 };
+        },
+        remixPost: async (...args) => {
+            order.push('generate');
+            return { ...DRAFT_RESULT, research: args[6] };
+        },
+        generateText: async () => { order.push('generate'); return { content: 'x' }; },
+        generateStyledImage: async () => ({ image_url: null }),
+        listPostTypes: async () => [],
+    });
+
+    app.setDeepThink(true);
+    el('ai-text-prompt').value = 'kubernetes';
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle(); await settle();
+
+    // Findings must be on screen before a word is written, so they can be judged.
+    equal('research runs before generation', order.join(','), 'research,generate');
+}
+
+async function testDeepThinkOffSkipsResearchEntirely() {
+    let researched = 0;
+    const { el } = boot({
+        researchTopic: async () => { researched += 1; return { ok: true, notes: 'x' }; },
+        generateText: async () => ({ content: 'a plain draft' }),
+    });
+
+    el('ai-text-prompt').value = 'kubernetes';
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle();
+
+    equal('no research when the toggle is off', researched, 0);
+}
+
+async function testFindingsThatFailAreShownNotSwallowed() {
+    const { app, el } = boot({
+        researchTopic: async () => ({ ok: false, reason: 'the sources did not address this topic' }),
+        generateText: async () => ({ content: 'a plain draft' }),
+    });
+
+    app.setDeepThink(true);
+    el('ai-text-prompt').value = 'kubernetes';
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle();
+
+    // A draft written without findings must not look like one written with them.
+    check('the empty result is rendered', !el('research-notes').hidden);
+    check('and it says why', el('research-notes').innerHTML.includes('did not address'));
+}
+
+async function testTurningItOffClearsPriorFindings() {
+    const { app, el } = boot();
+    app.setDeepThink(true);
+    app.setResearch({ ok: true, notes: '- old finding [1]', sources: [], pages_read: 1 });
+    check('findings are shown', !el('research-notes').hidden);
+
+    app.setDeepThink(false);
+    // Otherwise a later draft silently inherits research it never ran.
+    check('turning it off clears them', el('research-notes').hidden);
+    equal('and drops the held notes', app.research, null);
+}
+
 const run = async () => {
     await testSelectingAnExemplarBindsItToTheDraft();
     await testTheSelectionMakesTheDraftDirty();
@@ -284,6 +353,10 @@ const run = async () => {
     await testAHandoffFromDiscoveryLandsOnTheDraft();
     await testCollapsingTheLibraryIsRemembered();
     await testAStoredCollapseIsAppliedOnBoot();
+    await testDeepThinkRunsBeforeAnythingIsWritten();
+    await testDeepThinkOffSkipsResearchEntirely();
+    await testFindingsThatFailAreShownNotSwallowed();
+    await testTurningItOffClearsPriorFindings();
     report('P4 exemplar picker');
 };
 

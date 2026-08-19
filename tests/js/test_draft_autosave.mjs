@@ -36,6 +36,7 @@ function fillEveryField(app, el) {
     el('create-rhythm').value = 'short_punchy';
     el('create-word-type').value = 'technical';
     el('create-post-type').value = 'case_study';
+    app.setDeepThink(true);
     app.setExemplar(11, 'https://example.invalid/post', 'An Author');
     app.showSection('image');
     app.draftId = 77;
@@ -63,7 +64,7 @@ async function testRoundTrip() {
     const EXPECTED_FIELDS = [
         'draftId', 'body', 'tags', 'imageUrl', 'scheduleType', 'scheduledLocal',
         'topic', 'notes', 'paraCount', 'hookStyle', 'rhythm', 'wordType',
-        'postType', 'exemplarId', 'exemplarUrl', 'exemplarAuthor', 'section',
+        'postType', 'deepThink', 'exemplarId', 'exemplarUrl', 'exemplarAuthor', 'section',
         'refineHistory', 'refineRecent',
     ];
     const actualFields = Object.keys(before);
