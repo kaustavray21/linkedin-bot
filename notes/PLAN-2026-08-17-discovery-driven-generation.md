@@ -2,7 +2,7 @@
 
 Date: 2026-08-17 (rev 7 — S0, S1, P0–P3, P5, P6 executed)
 Branch: `jul-9-contentGeneration-fix-branch`
-Status: **IN PROGRESS — S0 ✅ · S1 ✅ · P0–P6 ✅ · P7 outstanding**
+Status: **IN PROGRESS — S0 ✅ · S1 ✅ · P0–P6 ✅ · P7 observation stage ✅, feedback stage outstanding**
 
 ## EXECUTION LOG — S1 (2026-08-18)
 
@@ -29,6 +29,28 @@ The parallel-rendering-block question is moot: a tier with 0% information gain d
 Harness: `scripts/spike_rendered_counts.py` (re-runnable). Full write-up: `~/.anvideck/projects/linkedin-bot/ref/GROUND_TRUTH_LINKEDIN_PUBLIC_POST_COUNTS.md`.
 
 **Consequence for P4/P7:** ⑨/⑩ become real via a parser fix, not a browser.
+
+## EXECUTION LOG — P7 observation stage (2026-08-19)
+
+**§3's scope gate was unnecessary.** P7 needs *your* post metrics, which I had assumed meant adding `r_member_postAnalytics`, re-consenting, and getting the product approved. It does not: a published post is a public LinkedIn post with a permalink, so the S1-fixed parser reads its counts through the existing fetcher. Verified against two real published posts before building anything — HTTP 200, counts parsed, no authwall. Only **impressions** still need the API scope, and §3 already allows the loop to run on likes/comments without them.
+
+| Commit | What |
+|---|---|
+| `c180495` | `post_metrics` — a time series, not a snapshot |
+| `ec78d16` | Capture via the public page, with the §5a B6 flood guard |
+| `bb1de58` | Hourly scheduled capture |
+| `a702fbe` | Rolling median and the outcome ratio |
+| `15e8016` | Dashboard panel — reports, changes nothing |
+
+**The flood guard is three bounds, not one.** A post is due only when its *newest* reading is stale; nothing is read past the capture window; and a per-day ceiling counts rows already written today rather than anything in memory — restarts are the risk, so an in-process counter would not bound them. Capture also stops while discovery's circuit is open: being blocked belongs to this IP, not to one subsystem.
+
+**Two refusals carry the analysis.** It will not compare across ages — the median is built from each other post's reading nearest the same age, and anything outside tolerance is dropped rather than stretched. And it will not report a median nobody could believe: below the minimum sample the answer is `not_enough_data` *with the sample size attached*, because "we looked and found two" is different information from "we did not look". A zero median keeps the engagement and withholds the ratio instead of reporting infinity.
+
+**Engagement is reactions alone.** Comments are frequently absent — LinkedIn omits the anchor at zero — so folding them in would mean treating unknown as zero, or a composite whose meaning shifts between posts. They are shown alongside instead.
+
+**What it says today:** one post inside the window reads "6 reactions at 98h, no baseline yet (0 comparable posts)". That is the intended answer. Four of five published posts predate the capture window, and a four-day-old post cannot honestly be compared with a six-week-old one. The panel earns its keep as posts accumulate readings from birth.
+
+**A migration lesson worth keeping:** the first downgrade dropped indexes before the table, which MySQL refuses when an index backs a foreign key — and because MySQL DDL is not transactional, the half-run downgrade left the table missing an index with the version stamp unchanged. Run down *and* up, never just up.
 
 ## EXECUTION LOG — P4 (2026-08-19)
 
