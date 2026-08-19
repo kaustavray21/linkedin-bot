@@ -183,6 +183,17 @@ export function refineBoxStub() {
     return el;
 }
 
+export function exemplarPickerStub() {
+    const el = new FakeEl('exemplar-picker');
+    // Records what app.js pushed in, so a test can assert the picker was kept
+    // in step with the exemplar rather than only the other way round.
+    el.selections = [];
+    el.posts = null;
+    el.setSelection = (state) => { el.selections.push(state); };
+    el.setPosts = (posts) => { el.posts = posts; };
+    return el;
+}
+
 /**
  * The component set a draft-editor test needs. Call before bootApp and pass
  * the result as `components`; radio groups register themselves.
@@ -193,6 +204,7 @@ export function editorComponents() {
         '#hashtag-editor': hashtagEditorStub(),
         'create-sections': createSectionsStub(),
         'refine-box': refineBoxStub(),
+        'exemplar-picker': exemplarPickerStub(),
     };
 }
 

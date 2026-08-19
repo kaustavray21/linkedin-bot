@@ -607,6 +607,31 @@ class App {
         this.exemplarAuthor = this.exemplarId ? (author || null) : null;
         if (this.hashtagEditor) this.hashtagEditor.setExemplar(this.exemplarId);
         this.showExemplarAttribution(this.exemplarUrl, this.exemplarAuthor);
+
+        // Every route into an exemplar ends here — the picker, a remix from the
+        // Discover tab, and hydrate() restoring a saved draft — so the picker is
+        // refreshed here rather than at each call site.
+        const picker = document.querySelector('exemplar-picker');
+        if (picker && picker.setSelection) {
+            picker.setSelection({
+                id: this.exemplarId,
+                url: this.exemplarUrl,
+                author: this.exemplarAuthor,
+            });
+        }
+    }
+
+    // The exemplar list, fetched when the picker is opened. History rather than
+    // the current search: a draft can legitimately be shaped after a post found
+    // weeks ago, and restricting it to the last search would hide those.
+    async loadExemplarOptions() {
+        const picker = document.querySelector('exemplar-picker');
+        if (!picker) return;
+        try {
+            picker.setPosts(await API.listDiscoveredPosts(null, 'recent', true));
+        } catch (error) {
+            this.showToast(error.message || 'Could not load discovered posts.', 'error');
+        }
     }
 
     // Where a remixed draft came from. Shown as plain text when there is no
@@ -1070,6 +1095,24 @@ class App {
             refine.addEventListener('refine-run', (e) =>
                 this.runRefine(e.detail.instruction, e.detail.button));
             refine.addEventListener('refine-undo', (e) => this.applyBody(e.detail.text));
+        }
+
+        const picker = document.querySelector('exemplar-picker');
+        if (picker) {
+            // The picker renders the choice; the exemplar itself stays on `app`,
+            // because serialize()/hydrate() have to carry it across autosaves and
+            // draft switches. State held inside the component would not survive.
+            // No explicit dirty flag: exemplarId is part of serialize(), so
+            // changing the selection makes serialize() !== lastSaved by itself.
+            picker.addEventListener('exemplar-select', (e) => {
+                const post = e.detail.post;
+                this.setExemplar(post.id, post.post_url, post.author_name);
+            });
+            picker.addEventListener('exemplar-clear', () => this.setExemplar(null));
+            // Loaded when the browser opens rather than on boot: the list is only
+            // needed once someone reaches for it, and it should reflect whatever
+            // Discovery found most recently rather than a snapshot from page load.
+            picker.addEventListener('exemplar-browse', () => this.loadExemplarOptions());
         }
 
         // Class toggle, never inline styles — the <=1024px media query hides the

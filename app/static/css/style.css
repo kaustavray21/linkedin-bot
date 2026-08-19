@@ -742,6 +742,70 @@ h1, h2, h3, h4, h5, h6 {
     text-transform: capitalize;
 }
 
+/* --- exemplar picker ------------------------------------------------------ */
+
+.exemplar-hint { margin: 0 0 8px; }
+
+.exemplar-chosen,
+.exemplar-item {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.exemplar-chosen { align-items: flex-start; justify-content: space-between; }
+.exemplar-chosen-author { font-weight: 600; }
+.exemplar-chosen-preview,
+.exemplar-item-preview {
+    margin: 4px 0 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+.exemplar-chosen-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+
+.exemplar-browser {
+    margin-top: 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+    background: var(--bg-secondary);
+}
+
+.exemplar-search { display: flex; align-items: center; gap: 8px; }
+.exemplar-search input {
+    flex: 1;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.88rem;
+}
+.exemplar-search-icon { color: var(--text-muted); }
+
+/* Bounded so the picker never pushes the rest of the form off screen; the list
+   can hold every post ever discovered. */
+.exemplar-list {
+    margin-top: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.exemplar-item { flex-direction: column; cursor: pointer; }
+.exemplar-item:hover { border-color: var(--accent-color, #6c8cff); }
+.exemplar-item-head { display: flex; align-items: center; gap: 4px; }
+.exemplar-item-author { font-weight: 600; font-size: 0.9rem; }
+.exemplar-item-metrics { margin-top: 4px; font-size: 0.75rem; color: var(--text-muted); }
+
 /* --- post types ---------------------------------------------------------- */
 
 .post-type-list { display: flex; flex-direction: column; gap: 8px; }

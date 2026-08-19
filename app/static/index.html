@@ -341,13 +341,10 @@
                                                  <h4>AI Copywriter & Style Assistant</h4>
                                              </div>
                                              <div class="ai-assist-body" style="display: flex; flex-direction: column; gap: 16px;">
-                                                 <!-- Exemplar source. The reference-file picker that stood here is
-                                                      gone; P4 replaces it with a picker over discovered posts.
-                                                      Until then Generate Draft uses the plain text path. -->
-                                                 <p class="help-text" id="exemplar-placeholder" style="margin: 0;">
-                                                     Drafting from discovered posts arrives with the Discovery picker.
-                                                     For now, enter a topic below for a plain draft.
-                                                 </p>
+                                                 <!-- Exemplar source. Replaces the deleted reference-file
+                                                      picker: these are posts Discovery actually found, so the
+                                                      list reflects the database and can legitimately be empty. -->
+                                                 <exemplar-picker></exemplar-picker>
 
                                                  <!-- Notes Field -->
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
