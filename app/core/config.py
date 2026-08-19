@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     # Engagement has effectively settled by then, and re-reading a post forever
     # spends requests to learn nothing.
     metrics_capture_window_days: int = 30
+    # How many other posts a rolling median has to rest on before it is shown
+    # at all. Below this the comparison is reported as "not enough data" rather
+    # than as a confident-looking number derived from two posts.
+    outcome_min_samples: int = 3
+    # Readings this far apart in age are not comparable — a post at 24h and one
+    # at 7 days are answering different questions.
+    outcome_age_tolerance_hours: int = 36
 
     # Discovery — classify every fetched post into a post type. One model call
     # per post, run concurrently across each fetch wave. Turn it off to keep a
