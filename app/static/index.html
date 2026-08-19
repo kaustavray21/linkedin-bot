@@ -385,11 +385,28 @@
                                                      </select>
                                                  </div>
 
-                                                 <!-- Notes Field -->
+                                                 <!-- Topic + Button Input Group -->
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                                                     <label for="create-notes-input" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Your Specific Examples / Notes (Optional)</label>
-                                                     <textarea id="create-notes-input" rows="2" placeholder="e.g. Include a personal story about debugging, avoid listing steps..." style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem; resize: vertical;"></textarea>
+                                                     <label for="ai-text-prompt" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Topic / Core Idea</label>
+                                                     <div class="input-group">
+                                                         <input type="text" id="ai-text-prompt" placeholder="Enter a topic (e.g. '3 tips for learning SQLAlchemy')">
+                                                         <button type="button" id="btn-generate-text" class="btn btn-secondary">
+                                                             <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
+                                                             <span class="btn-text">Generate Draft</span>
+                                                         </button>
+                                                     </div>
                                                  </div>
+                                             </div>
+                                         </div>
+                                     </div>
+
+                                                 <!-- The controls that shape the draft sit below the button that
+                                                      consumes them, so the panel says so. Otherwise pressing Generate
+                                                      immediately lets the defaults decide without the user ever
+                                                      seeing them. -->
+                                                 <p class="help-text" style="margin: -8px 0 0;">
+                                                     Paragraphs, tone and notes below shape the draft.
+                                                 </p>
 
                                                  <!-- Length, Formatting & Variations Options -->
                                                  <div style="display: flex; gap: 12px;">
@@ -431,21 +448,11 @@
                                                      </div>
                                                  </div>
 
-                                                 <!-- Topic + Button Input Group -->
+                                                 <!-- Notes Field -->
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                                                     <label for="ai-text-prompt" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Topic / Core Idea</label>
-                                                     <div class="input-group">
-                                                         <input type="text" id="ai-text-prompt" placeholder="Enter a topic (e.g. '3 tips for learning SQLAlchemy')">
-                                                         <button type="button" id="btn-generate-text" class="btn btn-secondary">
-                                                             <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
-                                                             <span class="btn-text">Generate Draft</span>
-                                                         </button>
-                                                     </div>
+                                                     <label for="create-notes-input" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Your Specific Examples / Notes (Optional)</label>
+                                                     <textarea id="create-notes-input" rows="2" placeholder="e.g. Include a personal story about debugging, avoid listing steps..." style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 8px; border-radius: var(--radius-sm); font-size: 0.9rem; resize: vertical;"></textarea>
                                                  </div>
-                                             </div>
-                                         </div>
-                                     </div>
-
                                      <!-- Review & Edit Post Body (Step 2) -->
                                      <div class="form-section" data-section="body">
                                          <label class="section-label" for="post-text-content">2. Review & Edit Post Body</label>
