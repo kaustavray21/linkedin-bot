@@ -1950,7 +1950,13 @@ draft-library { display: block; }
     grid-template-columns: 220px minmax(0, 1fr) 260px;
 }
 .create-workspace.library-hidden {
-    grid-template-columns: minmax(0, 1fr) 260px;
+    /* Three tracks, not two. `.library-peek` is a grid child with no placement
+       of its own, so a two-column collapsed grid handed it the editor's 1fr
+       column and pushed main into the rail's track and the rail onto its own
+       row — the whole form crushed to 260px behind a full-width empty button.
+       `auto` gives the button exactly its own width and leaves the other two
+       tracks meaning what they mean when the library is open. */
+    grid-template-columns: auto minmax(0, 1fr) 260px;
 }
 
 .draft-library {
