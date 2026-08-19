@@ -129,6 +129,13 @@ class Settings(BaseSettings):
     # at 7 days are answering different questions.
     outcome_age_tolerance_hours: int = 36
 
+    # Deep Think — web research before generating. Bounded because the user is
+    # waiting on the draft: a handful of results, read concurrently, each page
+    # truncated before it reaches the model.
+    research_result_limit: int = 5
+    research_page_char_cap: int = 6000
+    research_min_page_chars: int = 400
+
     # Discovery — classify every fetched post into a post type. One model call
     # per post, run concurrently across each fetch wave. Turn it off to keep a
     # search to its network cost alone; stored posts then carry no type.
