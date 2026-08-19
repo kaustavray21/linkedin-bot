@@ -389,7 +389,13 @@
                                                  <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
                                                      <label for="ai-text-prompt" style="font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);">Topic / Core Idea</label>
                                                      <div class="input-group">
-                                                         <input type="text" id="ai-text-prompt" placeholder="Enter a topic (e.g. '3 tips for learning SQLAlchemy')">
+                                                         <!-- A textarea, not an input. With Deep Think this box
+                                                              is a research brief rather than a headline, and a
+                                                              one-line field made anything longer than a phrase
+                                                              scroll out of sight while typing. The id is
+                                                              unchanged, so serialize()/hydrate() read it exactly
+                                                              as before. -->
+                                                         <textarea id="ai-text-prompt" rows="3" placeholder="Enter a topic, or paste keywords and notes to research (e.g. '3 tips for learning SQLAlchemy')"></textarea>
                                                          <button type="button" id="btn-generate-text" class="btn btn-secondary">
                                                              <i class="fa-solid fa-gear fa-spin spinner hidden"></i>
                                                              <span class="btn-text">Generate Draft</span>

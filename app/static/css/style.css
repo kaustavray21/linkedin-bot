@@ -1064,7 +1064,10 @@ h1, h2, h3, h4, h5, h6 {
     display: flex;
     gap: 12px;
 }
-.input-group input {
+/* The topic field is a textarea; everything else in an input-group is an
+   input. Both are styled the same so the group reads as one control. */
+.input-group input,
+.input-group textarea {
     flex-grow: 1;
     background: rgba(255, 255, 255, 0.025);
     border: 1px solid var(--border-color);
@@ -1075,7 +1078,22 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 0.9rem;
     transition: var(--transition);
 }
-.input-group input:focus {
+/* Stacked rather than side by side: a three-row textarea beside a button
+   leaves the button floating against a tall field. The button sits under it,
+   aligned to the end so it stays close to where the text finishes. */
+.input-group:has(textarea) {
+    flex-direction: column;
+    align-items: flex-end;
+}
+.input-group textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 72px;
+    line-height: 1.45;
+}
+
+.input-group input:focus,
+.input-group textarea:focus {
     outline: none;
     border-color: var(--color-primary);
 }
