@@ -917,6 +917,15 @@ class App {
                 textarea.value = response.content;
                 textarea.dispatchEvent(new Event('input')); // trigger char counter
                 document.getElementById('variations-selector-container').classList.add('hidden');
+
+                // Land on the draft, the way both exemplar paths already do
+                // through openHandoff(). Without this the text arrives in a body
+                // section you were never moved to, so a generation that worked
+                // looks like one that did nothing.
+                this.showEditor(true);
+                this.showSection('body');
+                this.refreshRail();
+
                 this.showToast('Draft content generated!', 'success');
             } catch (error) {
                 this.showToast(error.message || 'Generation failed.', 'error');

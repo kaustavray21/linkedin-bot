@@ -191,6 +191,59 @@ async function testTheTypeControlAppearsWithTheExemplar() {
     check('hidden again when cleared', group.hidden);
 }
 
+// ------------------------------------------------- where a generation lands --
+
+const DRAFT_RESULT = {
+    text: 'cloned', full_text: 'cloned', hashtags: [], notes: [],
+    image_url: null, image_style_note: null,
+    exemplar_id: 5, exemplar_url: null, exemplar_author: null,
+    similarity_jaccard: null, similarity_longest_run: null, similarity_band: null,
+};
+
+function landingBoot() {
+    return boot({
+        remixPost: async () => DRAFT_RESULT,
+        generateText: async () => ({ content: 'a plain draft' }),
+        generateStyledImage: async () => ({ image_url: null }),
+        listPostTypes: async () => [],
+    });
+}
+
+async function testTheExemplarPathLandsOnTheDraft() {
+    const { app, el, sel } = landingBoot();
+    select(sel('exemplar-picker'), POSTS[0]);
+    el('ai-text-prompt').value = 'shipping';
+
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle(); await settle();
+
+    equal('exemplar path lands on the body section', sel('create-sections').active, 'body');
+    check('exemplar path shows the editor', el('create-launcher').hidden);
+}
+
+async function testThePlainPathAlsoLandsOnTheDraft() {
+    // The gap this was written for: the plain generator wrote its text into a
+    // body section the user was never moved to, so a generation that worked
+    // looked like one that did nothing.
+    const { app, el, sel } = landingBoot();
+    el('ai-text-prompt').value = 'shipping';
+
+    el('btn-generate-text').dispatchEvent({ type: 'click' });
+    await settle(); await settle();
+
+    equal('plain path lands on the body section', sel('create-sections').active, 'body');
+    check('plain path shows the editor', el('create-launcher').hidden);
+}
+
+async function testAHandoffFromDiscoveryLandsOnTheDraft() {
+    const { app, el, sel } = landingBoot();
+    await app.runStagedHandoff(() => Promise.resolve(DRAFT_RESULT));
+    await settle(); await settle();
+
+    equal('discovery handoff lands on the body section', sel('create-sections').active, 'body');
+    check('discovery handoff shows the editor', el('create-launcher').hidden);
+}
+
 const run = async () => {
     await testSelectingAnExemplarBindsItToTheDraft();
     await testTheSelectionMakesTheDraftDirty();
@@ -201,6 +254,9 @@ const run = async () => {
     await testGenerateDraftClonesTheChosenPost();
     await testWithoutAnExemplarThePlainPathStillWorks();
     await testTheTypeControlAppearsWithTheExemplar();
+    await testTheExemplarPathLandsOnTheDraft();
+    await testThePlainPathAlsoLandsOnTheDraft();
+    await testAHandoffFromDiscoveryLandsOnTheDraft();
     report('P4 exemplar picker');
 };
 
