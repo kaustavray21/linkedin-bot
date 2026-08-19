@@ -1444,8 +1444,10 @@ confirm-modal {
     /* minmax(0,1fr) not 1fr: a grid child defaults to min-width:auto, so the
        textarea and long URLs would push the column past its track and force
        the whole page to scroll sideways. */
-    grid-template-columns: minmax(0, 1fr) 300px;
-    gap: 28px;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    /* 22, not 28. Two gaps at 28 cost 56px of the editor's width for spacing
+       between panels that already have their own borders. */
+    gap: 22px;
     /* 1600, not 1280. The library (240), the rail (300) and two 28px gaps eat
        596px before the editor gets any, so a 1280 cap held the editor to 684px
        — the "four columns is a lot of chrome" risk the draft plan called out.
@@ -1935,10 +1937,15 @@ confirm-modal {
 draft-library { display: block; }
 
 .create-workspace {
-    grid-template-columns: 240px minmax(0, 1fr) 300px;
+    /* 220 / 260, down from 240 / 300. The rail's status line already
+       ellipsises, so it loses nothing; the library's titles wrap rather than
+       truncate, so it gives up less. Together with the tighter gap this returns
+       ~76px to the editor at EVERY viewport — including the ones below the
+       max-width cap, which the cap change could not reach. */
+    grid-template-columns: 220px minmax(0, 1fr) 260px;
 }
 .create-workspace.library-hidden {
-    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr) 260px;
 }
 
 .draft-library {
@@ -2093,7 +2100,7 @@ draft-library { display: block; }
 
 @media (max-width: 1280px) {
     .create-workspace,
-    .create-workspace.library-hidden { grid-template-columns: minmax(0, 1fr) 300px; }
+    .create-workspace.library-hidden { grid-template-columns: minmax(0, 1fr) 260px; }
     .draft-library { display: none; }
     .library-peek { display: none; }
     .create-launcher { grid-column: 1 / -1; }
